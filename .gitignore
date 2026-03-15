@@ -1,0 +1,5 @@
+.hypothesis/
+.idea/
+.kiro/
+.vscode/
+__pycache__/

@@ -1,0 +1,282 @@
+[
+  {
+    "clause_id": "c-001",
+    "original_text": "When uncertain, prioritize comprehensive API coverage.",
+    "source_section": "Phase 1: Deep Research and Planning",
+    "source_file": "SKILL.md",
+    "scores": {
+      "O": 1,
+      "A": 1,
+      "F": 1,
+      "C": 2,
+      "R": 1,
+      "V": 1
+    },
+    "S_det": 1,
+    "S_proc": 1,
+    "classification": "COMPILABLE_SOFT",
+    "clause_type": "rule",
+    "risk_override": false,
+    "downgraded": false,
+    "confidence": 0.11,
+    "needs_review": false,
+    "enforcement_backends": [
+      "rubric_scoring",
+      "heuristic_linter",
+      "llm_judge_warn"
+    ],
+    "score_rationale": "Prioritization is a guideline; observability and verifiability rely on subjective judgment."
+  },
+  {
+    "clause_id": "c-002",
+    "original_text": "Use consistent prefixes (e.g., `github_create_issue`, `github_list_repos`) and action-oriented naming.",
+    "source_section": "Phase 1: Deep Research and Planning",
+    "source_file": "SKILL.md",
+    "scores": {
+      "O": 2,
+      "A": 2,
+      "F": 2,
+      "C": 1,
+      "R": 1,
+      "V": 2
+    },
+    "S_det": 2,
+    "S_proc": 2,
+    "classification": "COMPILABLE_MEDIUM",
+    "clause_type": "rule",
+    "risk_override": false,
+    "downgraded": false,
+    "confidence": 0.56,
+    "needs_review": true,
+    "enforcement_backends": [
+      "require_review_gate",
+      "evidence_requirement",
+      "parameterized_check"
+    ],
+    "score_rationale": "Naming conventions can be checked with heuristics; action-oriented naming is somewhat subjective."
+  },
+  {
+    "clause_id": "c-003",
+    "original_text": "Error messages should guide agents toward solutions with specific suggestions and next steps.",
+    "source_section": "Phase 1: Deep Research and Planning",
+    "source_file": "SKILL.md",
+    "scores": {
+      "O": 1,
+      "A": 1,
+      "F": 1,
+      "C": 2,
+      "R": 1,
+      "V": 1
+    },
+    "S_det": 1,
+    "S_proc": 1,
+    "classification": "COMPILABLE_SOFT",
+    "clause_type": "rule",
+    "risk_override": false,
+    "downgraded": false,
+    "confidence": 0.11,
+    "needs_review": false,
+    "enforcement_backends": [
+      "rubric_scoring",
+      "heuristic_linter",
+      "llm_judge_warn"
+    ],
+    "score_rationale": "Guidance is subjective; observability and verifiability rely on human judgment."
+  },
+  {
+    "clause_id": "c-004",
+    "original_text": "Start with the sitemap to find relevant pages: `https://modelcontextprotocol.io/sitemap.xml`",
+    "source_section": "Phase 1: Deep Research and Planning",
+    "source_file": "SKILL.md",
+    "scores": {
+      "O": 3,
+      "A": 3,
+      "F": 3,
+      "C": 0,
+      "R": 1,
+      "V": 3
+    },
+    "S_det": 3,
+    "S_proc": 3,
+    "classification": "COMPILABLE_MEDIUM",
+    "clause_type": "step",
+    "risk_override": false,
+    "downgraded": true,
+    "confidence": 1.0,
+    "needs_review": false,
+    "enforcement_backends": [
+      "require_review_gate",
+      "evidence_requirement",
+      "parameterized_check"
+    ],
+    "score_rationale": "Deterministic step with clear URL; fully observable and verifiable."
+  },
+  {
+    "clause_id": "c-005",
+    "original_text": "Then fetch specific pages with `.md` suffix for markdown format (e.g., `https://modelcontextprotocol.io/specification/draft.md`).",
+    "source_section": "Phase 1: Deep Research and Planning",
+    "source_file": "SKILL.md",
+    "scores": {
+      "O": 3,
+      "A": 3,
+      "F": 3,
+      "C": 0,
+      "R": 1,
+      "V": 3
+    },
+    "S_det": 3,
+    "S_proc": 3,
+    "classification": "COMPILABLE_MEDIUM",
+    "clause_type": "step",
+    "risk_override": false,
+    "downgraded": true,
+    "confidence": 1.0,
+    "needs_review": false,
+    "enforcement_backends": [
+      "require_review_gate",
+      "evidence_requirement",
+      "parameterized_check"
+    ],
+    "score_rationale": "Deterministic step with clear URL; fully observable and verifiable."
+  },
+  {
+    "clause_id": "c-006",
+    "original_text": "Use Zod (TypeScript) or Pydantic (Python)",
+    "source_section": "Phase 2: Implementation",
+    "source_file": "SKILL.md",
+    "scores": {
+      "O": 2,
+      "A": 2,
+      "F": 2,
+      "C": 1,
+      "R": 1,
+      "V": 2
+    },
+    "S_det": 2,
+    "S_proc": 2,
+    "classification": "COMPILABLE_MEDIUM",
+    "clause_type": "rule",
+    "risk_override": false,
+    "downgraded": false,
+    "confidence": 0.56,
+    "needs_review": true,
+    "enforcement_backends": [
+      "require_review_gate",
+      "evidence_requirement",
+      "parameterized_check"
+    ],
+    "score_rationale": "Choice of libraries can be checked with heuristics; somewhat subjective."
+  },
+  {
+    "clause_id": "c-007",
+    "original_text": "Include constraints and clear descriptions",
+    "source_section": "Phase 2: Implementation",
+    "source_file": "SKILL.md",
+    "scores": {
+      "O": 1,
+      "A": 1,
+      "F": 1,
+      "C": 2,
+      "R": 1,
+      "V": 1
+    },
+    "S_det": 1,
+    "S_proc": 1,
+    "classification": "COMPILABLE_SOFT",
+    "clause_type": "rule",
+    "risk_override": false,
+    "downgraded": false,
+    "confidence": 0.11,
+    "needs_review": false,
+    "enforcement_backends": [
+      "rubric_scoring",
+      "heuristic_linter",
+      "llm_judge_warn"
+    ],
+    "score_rationale": "Subjective guidance; observability and verifiability rely on human judgment."
+  },
+  {
+    "clause_id": "c-008",
+    "original_text": "Run `npm run build` to verify compilation",
+    "source_section": "Phase 3: Review and Test",
+    "source_file": "SKILL.md",
+    "scores": {
+      "O": 3,
+      "A": 3,
+      "F": 3,
+      "C": 0,
+      "R": 1,
+      "V": 3
+    },
+    "S_det": 3,
+    "S_proc": 3,
+    "classification": "COMPILABLE_MEDIUM",
+    "clause_type": "step",
+    "risk_override": false,
+    "downgraded": true,
+    "confidence": 1.0,
+    "needs_review": false,
+    "enforcement_backends": [
+      "require_review_gate",
+      "evidence_requirement",
+      "parameterized_check"
+    ],
+    "score_rationale": "Deterministic step with clear command; fully observable and verifiable."
+  },
+  {
+    "clause_id": "c-009",
+    "original_text": "Test with MCP Inspector: `npx @modelcontextprotocol/inspector`",
+    "source_section": "Phase 3: Review and Test",
+    "source_file": "SKILL.md",
+    "scores": {
+      "O": 3,
+      "A": 3,
+      "F": 3,
+      "C": 0,
+      "R": 1,
+      "V": 3
+    },
+    "S_det": 3,
+    "S_proc": 3,
+    "classification": "COMPILABLE_MEDIUM",
+    "clause_type": "step",
+    "risk_override": false,
+    "downgraded": true,
+    "confidence": 1.0,
+    "needs_review": false,
+    "enforcement_backends": [
+      "require_review_gate",
+      "evidence_requirement",
+      "parameterized_check"
+    ],
+    "score_rationale": "Deterministic step with clear command; fully observable and verifiable."
+  },
+  {
+    "clause_id": "c-010",
+    "original_text": "Questions must be READ-ONLY, INDEPENDENT, NON-DESTRUCTIVE",
+    "source_section": "Phase 4: Create Evaluations",
+    "source_file": "reference/evaluation.md",
+    "scores": {
+      "O": 2,
+      "A": 2,
+      "F": 2,
+      "C": 1,
+      "R": 2,
+      "V": 2
+    },
+    "S_det": 2,
+    "S_proc": 2,
+    "classification": "COMPILABLE_MEDIUM",
+    "clause_type": "rule",
+    "risk_override": false,
+    "downgraded": false,
+    "confidence": 0.56,
+    "needs_review": true,
+    "enforcement_backends": [
+      "require_review_gate",
+      "evidence_requirement",
+      "parameterized_check"
+    ],
+    "score_rationale": "Guideline for question creation; partially checkable with heuristics."
+  }
+]

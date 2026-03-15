@@ -1,0 +1,176 @@
+{
+  "entities": [
+    {
+      "entity_id": "evaluation_xml",
+      "kind": "Artifact",
+      "type_name": "EvaluationXML",
+      "schema_notes": "XML structure with <evaluation> root element containing multiple <qa_pair> elements; each <qa_pair> has <question> and <answer> fields",
+      "provenance_required": false,
+      "provenance": "EXPLICIT",
+      "source_text": "Create an XML file with this structure:\n\n```xml\n<evaluation>\n  <qa_pair>\n    <question>Find discussions about AI model launches with animal codenames. One model needed a specific safety designation that uses the format ASL-X. What number X was being determined for the model named after a spotted wild cat?</question>\n    <answer>3</answer>\n  </qa_pair>\n<!-- More qa_pairs... -->\n</evaluation>\n```",
+      "is_file": true,
+      "file_path": "< >",
+      "from_omit_files": false
+    },
+    {
+      "entity_id": "my_evaluation_xml",
+      "kind": "Artifact",
+      "type_name": "EvaluationXML",
+      "schema_notes": "XML structure with <evaluation> root element containing multiple <qa_pair> elements; each <qa_pair> has <question> and <answer> fields",
+      "provenance_required": false,
+      "provenance": "EXPLICIT",
+      "source_text": "Create your evaluation file (`my_evaluation.xml`):\n\n```xml\n<evaluation>\n   <qa_pair>\n      <question>Find the user who created the most issues in January 2024. What is their username?</question>\n      <answer>alice_developer</answer>\n   </qa_pair>\n   <qa_pair>\n      <question>Among all pull requests merged in Q1 2024, which repository had the highest number? Provide the repository name.</question>\n      <answer>backend-api</answer>\n   </qa_pair>\n   <qa_pair>\n      <question>Find the project that was completed in December 2023 and had the longest duration from start to finish. How many days did it take?</question>\n      <answer>127</answer>\n   </qa_pair>\n</evaluation>\n```",
+      "is_file": true,
+      "file_path": "my_evaluation.xml",
+      "from_omit_files": false
+    }
+  ],
+  "workflow_steps": [
+    {
+      "step_id": "step.understand_mcp_design",
+      "description": "Understand modern MCP design principles",
+      "prerequisites": [],
+      "produces": [],
+      "is_validation_gate": false,
+      "effects": [
+        "READ"
+      ],
+      "execution_mode": "LLM_PROMPT",
+      "tool_hint": "",
+      "provenance": "EXPLICIT",
+      "source_text": "Balance comprehensive API endpoint coverage with specialized workflow tools."
+    },
+    {
+      "step_id": "step.study_mcp_protocol",
+      "description": "Study MCP protocol documentation",
+      "prerequisites": [],
+      "produces": [],
+      "is_validation_gate": false,
+      "effects": [
+        "READ"
+      ],
+      "execution_mode": "LLM_PROMPT",
+      "tool_hint": "",
+      "provenance": "EXPLICIT",
+      "source_text": "Navigate the MCP specification: Start with the sitemap to find relevant pages."
+    },
+    {
+      "step_id": "step.study_framework_docs",
+      "description": "Study framework documentation for TypeScript and Python",
+      "prerequisites": [],
+      "produces": [],
+      "is_validation_gate": false,
+      "effects": [
+        "READ"
+      ],
+      "execution_mode": "LLM_PROMPT",
+      "tool_hint": "",
+      "provenance": "EXPLICIT",
+      "source_text": "Load framework documentation: For TypeScript (recommended): Use WebFetch to load TypeScript SDK."
+    },
+    {
+      "step_id": "step.plan_implementation",
+      "description": "Plan the implementation of the MCP server",
+      "prerequisites": [],
+      "produces": [],
+      "is_validation_gate": false,
+      "effects": [
+        "READ"
+      ],
+      "execution_mode": "LLM_PROMPT",
+      "tool_hint": "",
+      "provenance": "EXPLICIT",
+      "source_text": "Understand the API: Review the service's API documentation to identify key endpoints."
+    },
+    {
+      "step_id": "step.setup_project_structure",
+      "description": "Set up project structure for MCP server",
+      "prerequisites": [],
+      "produces": [],
+      "is_validation_gate": false,
+      "effects": [
+        "WRITE"
+      ],
+      "execution_mode": "LLM_PROMPT",
+      "tool_hint": "",
+      "provenance": "EXPLICIT",
+      "source_text": "See language-specific guides for project setup."
+    },
+    {
+      "step_id": "step.implement_core_infrastructure",
+      "description": "Implement core infrastructure for MCP server",
+      "prerequisites": [],
+      "produces": [],
+      "is_validation_gate": false,
+      "effects": [
+        "WRITE"
+      ],
+      "execution_mode": "LLM_PROMPT",
+      "tool_hint": "",
+      "provenance": "EXPLICIT",
+      "source_text": "Create shared utilities: API client with authentication, error handling helpers."
+    },
+    {
+      "step_id": "step.implement_tools",
+      "description": "Implement tools for MCP server",
+      "prerequisites": [],
+      "produces": [],
+      "is_validation_gate": false,
+      "effects": [
+        "WRITE"
+      ],
+      "execution_mode": "LLM_PROMPT",
+      "tool_hint": "",
+      "provenance": "EXPLICIT",
+      "source_text": "For each tool: Input Schema: Use Zod (TypeScript) or Pydantic (Python)."
+    },
+    {
+      "step_id": "step.review_code_quality",
+      "description": "Review code quality for MCP server",
+      "prerequisites": [],
+      "produces": [],
+      "is_validation_gate": false,
+      "effects": [
+        "READ"
+      ],
+      "execution_mode": "LLM_PROMPT",
+      "tool_hint": "",
+      "provenance": "EXPLICIT",
+      "source_text": "Review for: No duplicated code (DRY principle), consistent error handling."
+    },
+    {
+      "step_id": "step.build_and_test",
+      "description": "Build and test the MCP server",
+      "prerequisites": [],
+      "produces": [],
+      "is_validation_gate": false,
+      "effects": [
+        "EXEC"
+      ],
+      "execution_mode": "PROMPT_TO_CODE",
+      "tool_hint": "",
+      "provenance": "EXPLICIT",
+      "source_text": "TypeScript: Run `npm run build` to verify compilation."
+    },
+    {
+      "step_id": "step.create_evaluations",
+      "description": "Create evaluations to test MCP server effectiveness",
+      "prerequisites": [],
+      "produces": [
+        "evaluation_xml"
+      ],
+      "is_validation_gate": false,
+      "effects": [
+        "WRITE"
+      ],
+      "execution_mode": "LLM_PROMPT",
+      "tool_hint": "",
+      "provenance": "EXPLICIT",
+      "source_text": "After implementing your MCP server, create comprehensive evaluations."
+    }
+  ],
+  "interaction_requirements": [],
+  "alternative_flows": [],
+  "exception_flows": [],
+  "needs_review_items": []
+}

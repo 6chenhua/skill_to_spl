@@ -1,0 +1,351 @@
+"""
+Data models for the skill-to-CNL-P normalization pipeline.
+
+All dataclasses are pure data containers — no business logic.
+Pipeline stages produce and consume these types.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Optional
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pre-processing: P1 — Reference Graph Builder
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class FileNode:
+    """Represents a single file in the skill package."""
+    path: str                    # relative to skill root
+    kind: str                    # "doc" | "script" | "asset" | "data"
+    size_bytes: int
+    head_lines: list[str]        # first 20 lines (doc) or head comment (script ≤5 lines)
+    references: list[str]        # other filenames mentioned in this file (regex scan)
+
+
+@dataclass
+class FileReferenceGraph:
+    """Output of P1. The mechanical inventory of a skill package."""
+    skill_id: str
+    root_path: str
+    skill_md_content: str        # full text of SKILL.md (anchor for P2)
+    frontmatter: dict[str, Any]  # parsed YAML frontmatter from SKILL.md
+    nodes: dict[str, FileNode]   # rel_path → FileNode
+    edges: dict[str, list[str]]  # referencing_file → [referenced_files]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pre-processing: P2 — File Role Resolver (LLM output)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class FileRoleEntry:
+    """LLM-assigned role and read priority for a single file."""
+    role: str                           # from taxonomy (see prompts/p2_file_role_resolver.py)
+    read_priority: int                  # 1=must_read, 2=include_summary, 3=omit
+    must_read_for_normalization: bool
+    reasoning: str                      # one sentence citing specific source text
+
+
+# FileRoleMap: dict[str, FileRoleEntry]  (path → entry)
+# Defined as a type alias; stored as plain dict in SkillPackage for JSON-serializability.
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pre-processing: P3 — Skill Package Assembler
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class SkillPackage:
+    """Output of P3. The assembled, annotated input for Step 1."""
+    skill_id: str
+    root_path: str
+    frontmatter: dict[str, Any]
+    merged_doc_text: str                # concatenated content with file boundary markers
+    file_role_map: dict[str, Any]       # path → FileRoleEntry dict (serializable)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Step 1 — Structure Extraction
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class SectionItem:
+    """A single item within a canonical section. Text is always verbatim."""
+    text: str           # verbatim from source — never paraphrased
+    source: str         # source filename
+    multi: bool = False # True if this item appears in multiple sections
+
+
+@dataclass
+class SectionBundle:
+    """
+    Output of Step 1. Eight canonical sections covering the full skill document.
+    All text is verbatim; nothing is dropped.
+    """
+    intent:      list[SectionItem] = field(default_factory=list)
+    workflow:    list[SectionItem] = field(default_factory=list)
+    constraints: list[SectionItem] = field(default_factory=list)
+    tools:       list[SectionItem] = field(default_factory=list)
+    artifacts:   list[SectionItem] = field(default_factory=list)
+    evidence:    list[SectionItem] = field(default_factory=list)
+    examples:    list[SectionItem] = field(default_factory=list)
+    notes:       list[SectionItem] = field(default_factory=list)
+
+    def all_sections(self) -> dict[str, list[SectionItem]]:
+        return {
+            "INTENT":      self.intent,
+            "WORKFLOW":    self.workflow,
+            "CONSTRAINTS": self.constraints,
+            "TOOLS":       self.tools,
+            "ARTIFACTS":   self.artifacts,
+            "EVIDENCE":    self.evidence,
+            "EXAMPLES":    self.examples,
+            "NOTES":       self.notes,
+        }
+
+    def to_text(self, sections: Optional[list[str]] = None) -> str:
+        """Render selected (or all) sections as labelled text blocks."""
+        target = self.all_sections()
+        if sections:
+            target = {k: v for k, v in target.items() if k in sections}
+        parts = []
+        for name, items in target.items():
+            if items:
+                block = "\n".join(
+                    f"  [{item.source}] {item.text}" + (" [MULTI]" if item.multi else "")
+                    for item in items
+                )
+                parts.append(f"## {name}\n{block}")
+        return "\n\n".join(parts)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Step 2A — Clause Extraction + Scoring (LLM output)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class RawScores:
+    """Six rubric dimensions scored by the LLM (0–3 each)."""
+    O: int  # Observability
+    A: int  # Actionability
+    F: int  # Formalizability
+    C: int  # Context dependence
+    R: int  # Risk / Safety criticality
+    V: int  # Verifiability
+
+    def validate(self) -> None:
+        for dim, val in [("O", self.O), ("A", self.A), ("F", self.F),
+                         ("C", self.C), ("R", self.R), ("V", self.V)]:
+            if not (0 <= val <= 3):
+                raise ValueError(f"Score {dim}={val} out of range [0,3]")
+
+
+@dataclass
+class RawClause:
+    """
+    A single normative clause as output by Step 2A LLM.
+    May be a parent (split=True) or leaf clause.
+    """
+    clause_id: str
+    source_section: str
+    source_file: str
+    original_text: str
+    is_normative: bool
+    split: bool
+    sub_clauses: list[RawClause]   # non-empty only when split=True
+    scores: RawScores
+    score_rationale: str
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Step 2B — Classification (pure code)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class Classification(str, Enum):
+    HARD   = "COMPILABLE_HARD"
+    MEDIUM = "COMPILABLE_MEDIUM"
+    SOFT   = "COMPILABLE_SOFT"
+    NON    = "NON_COMPILABLE"
+
+
+@dataclass
+class ClassifiedClause:
+    """
+    Output of Step 2B. A RawClause enriched with deterministic classification.
+    """
+    clause_id: str
+    original_text: str
+    source_section: str
+    source_file: str
+    scores: RawScores
+    S_det: int                          # min(O, F, V) — deterministic checkability
+    S_proc: int                         # min(A, V)    — process executability
+    classification: Classification
+    risk_override: bool                 # True if R==3 forced upgrade from SOFT
+    confidence: float                   # [0.0, 1.0] enforceability confidence
+    needs_review: bool
+    enforcement_backends: list[str]
+    score_rationale: str
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Step 3 — Structured Entity and Step Extraction (LLM output)
+#
+# Design notes:
+#   - CapabilitySpec is intentionally absent: SPL has no independent capabilities
+#     block; capabilities were only a naming indirection layer with no SPL target.
+#   - Routing to DEFINE_GUARDRAIL is driven by WorkflowStepSpec.is_validation_gate
+#     (derived from EVIDENCE section), not from capability inference.
+#   - Routing to DEFINE_APIS is driven by WorkflowStepSpec.effects containing NETWORK.
+#   - NON_COMPILABLE clauses do NOT go to EXCEPTION_FLOW (wrong semantics).
+#     They become InteractionRequirement entries → [INPUT DISPLAY ...] in MAIN_FLOW.
+#   - EXCEPTION_FLOW is reserved for validation gate failures (tool exit ≠ 0, file
+#     not produced), derived from is_validation_gate=True steps.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class EntitySpec:
+    entity_id: str
+    kind: str                           # Artifact | Run | Evidence | Record
+    type_name: str
+    schema_notes: str                   # enriched by EXAMPLES section when available
+    provenance_required: bool
+    provenance: str                     # EXPLICIT | ASSUMED | LOW_CONFIDENCE
+    source_text: str
+
+
+@dataclass
+class WorkflowStepSpec:
+    """
+    A single step in the skill workflow, rewritten into SPL-ready form.
+
+    is_validation_gate=True  → S4D emits DEFINE_GUARDRAIL for this step.
+    "NETWORK" in effects     → S4D emits DEFINE_APIS for this step.
+    Everything else          → S4E emits a COMMAND inside MAIN_FLOW.
+
+    is_validation_gate=True steps ALSO drive EXCEPTION_FLOW generation in S4E:
+    the exception path handles what happens when the validation fails at runtime.
+    """
+    step_id: str                        # step.<action_name>  (snake_case)
+    description: str                    # SPL-ready COMMAND description
+                                        # (Step 1 verbatim rewritten for clarity)
+    prerequisites: list[str]            # entity_ids that must exist before this step
+    produces: list[str]                 # entity_ids this step creates
+    is_validation_gate: bool            # True if derived from EVIDENCE (→ GUARDRAIL)
+    effects: list[str]                  # READ|WRITE|NETWORK|EXEC|REMOTE_RUN|PR_CREATE
+    tool_hint: str                      # explicit tool/script name if stated, else ""
+    provenance: str                     # EXPLICIT | ASSUMED
+    source_text: str                    # verbatim anchor in source
+
+
+@dataclass
+class InteractionRequirement:
+    """
+    Derived from NON_COMPILABLE clauses.
+    Represents a point in the workflow where the agent must interact with the user
+    before proceeding — asking a question, presenting a choice, or stopping.
+
+    In SPL these become [INPUT DISPLAY ...] commands inline in MAIN_FLOW,
+    placed just before the step they gate.
+    """
+    req_id: str
+    condition: str                      # when this interaction is triggered
+    interaction_type: str               # ASK | STOP | ELICIT
+    prompt: str                         # question or message to present to user
+    gates_step: str                     # step_id this interaction precedes (or "" if general)
+    source_text: str                    # verbatim original NON clause text
+
+
+@dataclass
+class SuccessCriteria:
+    """
+    What the skill considers "done".
+    Used in S4E to annotate the WORKER [OUTPUTS] block semantically.
+    """
+    description: str
+    deterministic: bool
+    provenance: str                     # EXPLICIT | LOW_CONFIDENCE
+    source_text: str
+
+
+@dataclass
+class NeedsReviewItem:
+    """
+    Human review flag. NOT consumed by Step 4 SPL emission.
+    Goes only to review_summary for human inspection.
+    """
+    item: str
+    reason: str
+    question: str
+
+
+@dataclass
+class StructuredSpec:
+    """
+    Output of Step 3 (formerly InterfaceSpec).
+    Renamed to StructuredSpec to reflect the actual job: structured extraction
+    and naming, not interface contract inference.
+
+    Step 4 routing:
+      entities                              → S4C  DEFINE_VARIABLES / DEFINE_FILES
+      workflow_steps (is_validation_gate)   → S4D  DEFINE_GUARDRAIL
+      workflow_steps (NETWORK in effects)   → S4D  DEFINE_APIS
+      workflow_steps (everything else)      → S4E  MAIN_FLOW COMMANDs
+      workflow_steps (is_validation_gate)   → S4E  EXCEPTION_FLOW (failure path)
+      interaction_requirements              → S4E  [INPUT DISPLAY ...] in MAIN_FLOW
+      medium_clauses (from Step 2B)         → S4E  ALTERNATIVE_FLOW
+      success_criteria                      → S4E  [OUTPUTS] semantic annotation
+      needs_review_items                    → review_summary only (not SPL)
+    """
+    entities: list[EntitySpec]
+    workflow_steps: list[WorkflowStepSpec]
+    interaction_requirements: list[InteractionRequirement]
+    success_criteria: SuccessCriteria
+    needs_review_items: list[NeedsReviewItem]  # human review only, not for SPL
+
+
+# Keep InterfaceSpec as alias for backward compatibility during transition
+InterfaceSpec = StructuredSpec
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Step 4 — CNL-P Emission (LLM output)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class SPLSpec:
+    """Output of Step 4. The final normalized SPL specification."""
+    skill_id: str
+    spl_text: str                       # the complete SPL code block
+    review_summary: str                 # plain-text review summary (NEEDS_REVIEW items etc.)
+    clause_counts: dict[str, int]       # {"HARD": N, "MEDIUM": N, "SOFT": N, "NON_COMPILABLE": N}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Top-level pipeline result
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class PipelineResult:
+    """The complete output of a full pipeline run."""
+    skill_id: str
+
+    # intermediate outputs (kept for traceability / rerun from checkpoint)
+    graph: FileReferenceGraph
+    file_role_map: dict[str, Any]
+    package: SkillPackage
+    section_bundle: SectionBundle
+    raw_clauses: list[RawClause]
+    classified_clauses: list[ClassifiedClause]
+    structured_spec: StructuredSpec
+
+    # final output
+    spl_spec: SPLSpec
+
+    # diagnostics
+    needs_review_count: int = 0
+    low_confidence_count: int = 0

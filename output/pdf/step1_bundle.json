@@ -1,0 +1,462 @@
+{
+  "intent": [
+    {
+      "text": "This guide covers essential PDF processing operations using Python libraries and command-line tools. For advanced features, JavaScript libraries, and detailed examples, see reference.md. If you need to fill out a PDF form, read forms.md and follow its instructions.",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "This document contains advanced PDF processing features, detailed examples, and additional libraries not covered in the main skill instructions.",
+      "source": "reference.md (summary)",
+      "multi": false
+    }
+  ],
+  "workflow": [
+    {
+      "text": "If you need to fill out a PDF form, first check to see if the PDF has fillable form fields. Run this script from this file's directory: `python scripts/check_fillable_fields <file.pdf>`, and depending on the result go to either the \"Fillable fields\" or \"Non-fillable fields\" and follow those instructions.",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "If the PDF has fillable form fields:\n- Run this script from this file's directory: `python scripts/extract_form_field_info.py <input.pdf> <field_info.json>`. It will create a JSON file with a list of fields in this format:\n```\n[\n  {\n    \"field_id\": (unique ID for the field),\n    \"page\": (page number, 1-based),\n    \"rect\": ([left, bottom, right, top] bounding box in PDF coordinates, y=0 is the bottom of the page),\n    \"type\": (\"text\", \"checkbox\", \"radio_group\", or \"choice\"),\n  },\n  // Checkboxes have \"checked_value\" and \"unchecked_value\" properties:\n  {\n    \"field_id\": (unique ID for the field),\n    \"page\": (page number, 1-based),\n    \"type\": \"checkbox\",\n    \"checked_value\": (Set the field to this value to check the checkbox),\n    \"unchecked_value\": (Set the field to this value to uncheck the checkbox),\n  },\n  // Radio groups have a \"radio_options\" list with the possible choices.\n  {\n    \"field_id\": (unique ID for the field),\n    \"page\": (page number, 1-based),\n    \"type\": \"radio_group\",\n    \"radio_options\": [\n      {\n        \"value\": (set the field to this value to select this radio option),\n        \"rect\": (bounding box for the radio button for this option)\n      },\n      // Other radio options\n    ]\n  },\n  // Multiple choice fields have a \"choice_options\" list with the possible choices:\n  {\n    \"field_id\": (unique ID for the field),\n    \"page\": (page number, 1-based),\n    \"type\": \"choice\",\n    \"choice_options\": [\n      {\n        \"value\": (set the field to this value to select this option),\n        \"text\": (display text of the option)\n      },\n      // Other choice options\n    ],\n  }\n]\n```",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "- Convert the PDF to PNGs (one image for each page) with this script (run from this file's directory):\n`python scripts/convert_pdf_to_images.py <file.pdf> <output_directory>`\nThen analyze the images to determine the purpose of each form field (make sure to convert the bounding box PDF coordinates to image coordinates).",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "- Create a `field_values.json` file in this format with the values to be entered for each field:\n```\n[\n  {\n    \"field_id\": \"last_name\", // Must match the field_id from `extract_form_field_info.py`\n    \"description\": \"The user's last name\",\n    \"page\": 1, // Must match the \"page\" value in field_info.json\n    \"value\": \"Simpson\"\n  },\n  {\n    \"field_id\": \"Checkbox12\",\n    \"description\": \"Checkbox to be checked if the user is 18 or over\",\n    \"page\": 1,\n    \"value\": \"/On\" // If this is a checkbox, use its \"checked_value\" value to check it. If it's a radio button group, use one of the \"value\" values in \"radio_options\".\n  },\n  // more fields\n]\n```",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "- Run the `fill_fillable_fields.py` script from this file's directory to create a filled-in PDF:\n`python scripts/fill_fillable_fields.py <input pdf> <field_values.json> <output pdf>`\nThis script will verify that the field IDs and values you provide are valid; if it prints error messages, correct the appropriate fields and try again.",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "If the PDF doesn't have fillable form fields, you'll need to visually determine where the data should be added and create text annotations. Follow the below steps *exactly*. You MUST perform all of these steps to ensure that the the form is accurately completed. Details for each step are below.\n- Convert the PDF to PNG images and determine field bounding boxes.\n- Create a JSON file with field information and validation images showing the bounding boxes.\n- Validate the the bounding boxes.\n- Use the bounding boxes to fill in the form.",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "## Step 1: Visual Analysis (REQUIRED)\n- Convert the PDF to PNG images. Run this script from this file's directory:\n`python scripts/convert_pdf_to_images.py <file.pdf> <output_directory>`\nThe script will create a PNG image for each page in the PDF.\n- Carefully examine each PNG image and identify all form fields and areas where the user should enter data. For each form field where the user should enter text, determine bounding boxes for both the form field label, and the area where the user should enter text. The label and entry bounding boxes MUST NOT INTERSECT; the text entry box should only include the area where data should be entered. Usually this area will be immediately to the side, above, or below its label. Entry bounding boxes must be tall and wide enough to contain their text.",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "### Step 2: Create fields.json and validation images (REQUIRED)\n- Create a file named `fields.json` with information for the form fields and bounding boxes in this format:\n```\n{\n  \"pages\": [\n    {\n      \"page_number\": 1,\n      \"image_width\": (first page image width in pixels),\n      \"image_height\": (first page image height in pixels),\n    },\n    {\n      \"page_number\": 2,\n      \"image_width\": (second page image width in pixels),\n      \"image_height\": (second page image height in pixels),\n    }\n    // additional pages\n  ],\n  \"form_fields\": [\n    // Example for a text field.\n    {\n      \"page_number\": 1,\n      \"description\": \"The user's last name should be entered here\",\n      // Bounding boxes are [left, top, right, bottom]. The bounding boxes for the label and text entry should not overlap.\n      \"field_label\": \"Last name\",\n      \"label_bounding_box\": [30, 125, 95, 142],\n      \"entry_bounding_box\": [100, 125, 280, 142],\n      \"entry_text\": {\n        \"text\": \"Johnson\", // This text will be added as an annotation at the entry_bounding_box location\n        \"font_size\": 14, // optional, defaults to 14\n        \"font_color\": \"000000\", // optional, RRGGBB format, defaults to 000000 (black)\n      }\n    },\n    // Example for a checkbox. TARGET THE SQUARE for the entry bounding box, NOT THE TEXT\n    {\n      \"page_number\": 2,\n      \"description\": \"Checkbox that should be checked if the user is over 18\",\n      \"entry_bounding_box\": [140, 525, 155, 540],  // Small box over checkbox square\n      \"field_label\": \"Yes\",\n      \"label_bounding_box\": [100, 525, 132, 540],  // Box containing \"Yes\" text\n      // Use \"X\" to check a checkbox.\n      \"entry_text\": {\n        \"text\": \"X\",\n      }\n    }\n    // additional form field entries\n  ]\n}\n```",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "Create validation images by running this script from this file's directory for each page:\n`python scripts/create_validation_image.py <page_number> <path_to_fields.json> <input_image_path> <output_image_path>\n\nThe validation images will have red rectangles where text should be entered, and blue rectangles covering label text.",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "### Step 3: Validate Bounding Boxes (REQUIRED)\n#### Automated intersection check\n- Verify that none of bounding boxes intersect and that the entry bounding boxes are tall enough by checking the fields.json file with the `check_bounding_boxes.py` script (run from this file's directory):\n`python scripts/check_bounding_boxes.py <JSON file>`\n\nIf there are errors, reanalyze the relevant fields, adjust the bounding boxes, and iterate until there are no remaining errors. Remember: label (blue) bounding boxes should contain text labels, entry (red) boxes should not.",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "#### Manual image inspection\n**CRITICAL: Do not proceed without visually inspecting validation images**\n- Red rectangles must ONLY cover input areas\n- Red rectangles MUST NOT contain any text\n- Blue rectangles should contain label text\n- For checkboxes:\n  - Red rectangle MUST be centered on the checkbox square\n  - Blue rectangle should cover the text label for the checkbox\n\n- If any rectangles look wrong, fix fields.json, regenerate the validation images, and verify again. Repeat this process until the bounding boxes are fully accurate.",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "### Step 4: Add annotations to the PDF\nRun this script from this file's directory to create a filled-out PDF using the information in fields.json:\n`python scripts/fill_pdf_form_with_annotations.py <input_pdf_path> <path_to_fields.json> <output_pdf_path>",
+      "source": "forms.md",
+      "multi": false
+    }
+  ],
+  "constraints": [
+    {
+      "text": "**CRITICAL: You MUST complete these steps in order. Do not skip ahead to writing code.**",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "You MUST perform all of these steps to ensure that the the form is accurately completed.",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "The label and entry bounding boxes MUST NOT INTERSECT; the text entry box should only include the area where data should be entered.",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "Entry bounding boxes must be tall and wide enough to contain their text.",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "#### Manual image inspection\n**CRITICAL: Do not proceed without visually inspecting validation images**",
+      "source": "forms.md",
+      "multi": false
+    }
+  ],
+  "tools": [
+    {
+      "text": "from pypdf import PdfReader, PdfWriter",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "import pdfplumber",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "import pandas as pd",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "from reportlab.lib.pagesizes import letter\nfrom reportlab.pdfgen import canvas",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "from reportlab.lib.pagesizes import letter\nfrom reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak\nfrom reportlab.lib.styles import getSampleStyleSheet",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "pdftotext (poppler-utils)",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "qpdf",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "pdftk (if available)",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "import pytesseract\nfrom pdf2image import convert_from_path",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "pdfimages (poppler-utils)",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "from pypdf import PdfReader, PdfWriter",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "pypdfium2 Library (Apache/BSD License)",
+      "source": "reference.md (summary)",
+      "multi": false
+    },
+    {
+      "text": "import pypdfium2 as pdfium\nfrom PIL import Image",
+      "source": "reference.md (summary)",
+      "multi": false
+    },
+    {
+      "text": "python scripts/check_fillable_fields <file.pdf>",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "python scripts/extract_form_field_info.py <input.pdf> <field_info.json>",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "python scripts/convert_pdf_to_images.py <file.pdf> <output_directory>",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "python scripts/fill_fillable_fields.py <input pdf> <field_values.json> <output pdf>",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "python scripts/convert_pdf_to_images.py <file.pdf> <output_directory>",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "python scripts/create_validation_image.py <page_number> <path_to_fields.json> <input_image_path> <output_image_path>",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "python scripts/check_bounding_boxes.py <JSON file>",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "python scripts/fill_pdf_form_with_annotations.py <input_pdf_path> <path_to_fields.json> <output_pdf_path>",
+      "source": "forms.md",
+      "multi": false
+    }
+  ],
+  "artifacts": [
+    {
+      "text": "reader = PdfReader(\"document.pdf\")",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "writer = PdfWriter()\nfor pdf_file in [\"doc1.pdf\", \"doc2.pdf\", \"doc3.pdf\"]:\n    reader = PdfReader(pdf_file)\n    for page in reader.pages:\n        writer.add_page(page)\n\nwith open(\"merged.pdf\", \"wb\") as output:\n    writer.write(output)",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "reader = PdfReader(\"input.pdf\")\nfor i, page in enumerate(reader.pages):\n    writer = PdfWriter()\n    writer.add_page(page)\n    with open(f\"page_{i+1}.pdf\", \"wb\") as output:\n        writer.write(output)",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "reader = PdfReader(\"document.pdf\")\nmeta = reader.metadata\nprint(f\"Title: {meta.title}\")\nprint(f\"Author: {meta.author}\")\nprint(f\"Subject: {meta.subject}\")\nprint(f\"Creator: {meta.creator}\")",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "reader = PdfReader(\"input.pdf\")\nwriter = PdfWriter()\n\npage = reader.pages[0]\npage.rotate(90)  # Rotate 90 degrees clockwise\nwriter.add_page(page)\n\nwith open(\"rotated.pdf\", \"wb\") as output:\n    writer.write(output)",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "with pdfplumber.open(\"document.pdf\") as pdf:\n    for page in pdf.pages:\n        text = page.extract_text()\n        print(text)",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "with pdfplumber.open(\"document.pdf\") as pdf:\n    for i, page in enumerate(pdf.pages):\n        tables = page.extract_tables()\n        for j, table in enumerate(tables):\n            print(f\"Table {j+1} on page {i+1}:\")\n            for row in table:\n                print(row)",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "with pdfplumber.open(\"document.pdf\") as pdf:\n    all_tables = []\n    for page in pdf.pages:\n        tables = page.extract_tables()\n        for table in tables:\n            if table:  # Check if table is not empty\n                df = pd.DataFrame(table[1:], columns=table[0])\n                all_tables.append(df)\n\n# Combine all tables\nif all_tables:\n    combined_df = pd.concat(all_tables, ignore_index=True)\n    combined_df.to_excel(\"extracted_tables.xlsx\", index=False)",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "c = canvas.Canvas(\"hello.pdf\", pagesize=letter)\nwidth, height = letter\n\n# Add text\nc.drawString(100, height - 100, \"Hello World!\")\nc.drawString(100, height - 120, \"This is a PDF created with reportlab\")\n\n# Add a line\nc.line(100, height - 140, 400, height - 140)\n\n# Save\nc.save()",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "doc = SimpleDocTemplate(\"report.pdf\", pagesize=letter)\nstyles = getSampleStyleSheet()\nstory = []\n\n# Add content\ntitle = Paragraph(\"Report Title\", styles['Title'])\nstory.append(title)\nstory.append(Spacer(1, 12))\n\nbody = Paragraph(\"This is the body of the report. \" * 20, styles['Normal'])\nstory.append(body)\nstory.append(PageBreak())\n\n# Page 2\nstory.append(Paragraph(\"Page 2\", styles['Heading1']))\nstory.append(Paragraph(\"Content for page 2\", styles['Normal']))\n\n# Build PDF\ndoc.build(story)",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "# Extract text\npdftotext input.pdf output.txt\n\n# Extract text preserving layout\npdftotext -layout input.pdf output.txt\n\n# Extract specific pages\npdftotext -f 1 -l 5 input.pdf output.txt  # Pages 1-5",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "# Merge PDFs\nqpdf --empty --pages file1.pdf file2.pdf -- merged.pdf\n\n# Split pages\nqpdf input.pdf --pages . 1-5 -- pages1-5.pdf\nqpdf input.pdf --pages . 6-10 -- pages6-10.pdf\n\n# Rotate pages\nqpdf input.pdf output.pdf --rotate=+90:1  # Rotate page 1 by 90 degrees\n\n# Remove password\nqpdf --password=mypassword --decrypt encrypted.pdf decrypted.pdf",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "# Merge\npdftk file1.pdf file2.pdf cat output merged.pdf\n\n# Split\npdftk input.pdf burst\n\n# Rotate\npdftk input.pdf rotate 1east output rotated.pdf",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "# Convert PDF to images\nimages = convert_from_path('scanned.pdf')\n\n# OCR each page\ntext = \"\"\nfor i, image in enumerate(images):\n    text += f\"Page {i+1}:\n\"\n    text += pytesseract.image_to_string(image)\n    text += \"\n\n\"\n\nprint(text)",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "# Create watermark (or load existing)\nwatermark = PdfReader(\"watermark.pdf\").pages[0]\n\n# Apply to all pages\nreader = PdfReader(\"document.pdf\")\nwriter = PdfWriter()\n\nfor page in reader.pages:\n    page.merge_page(watermark)\n    writer.add_page(page)\n\nwith open(\"watermarked.pdf\", \"wb\") as output:\n    writer.write(output)",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "# Using pdfimages (poppler-utils)\npdfimages -j input.pdf output_prefix\n\n# This extracts all images as output_prefix-000.jpg, output_prefix-001.jpg, etc.",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "reader = PdfReader(\"input.pdf\")\nwriter = PdfWriter()\n\nfor page in reader.pages:\n    writer.add_page(page)\n\n# Add password\nwriter.encrypt(\"userpassword\", \"ownerpassword\")\n\nwith open(\"encrypted.pdf\", \"wb\") as output:\n    writer.write(output)",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "pdf = pdfium.PdfDocument(\"document.pdf\")\n\n# Render page to image\npage = pdf[0]  # First page\nbitmap = page.render(",
+      "source": "reference.md (summary)",
+      "multi": false
+    },
+    {
+      "text": "It will create a JSON file with a list of fields in this format:\n```\n[\n  {\n    \"field_id\": (unique ID for the field),\n    \"page\": (page number, 1-based),\n    \"rect\": ([left, bottom, right, top] bounding box in PDF coordinates, y=0 is the bottom of the page),\n    \"type\": (\"text\", \"checkbox\", \"radio_group\", or \"choice\"),\n  },\n  // Checkboxes have \"checked_value\" and \"unchecked_value\" properties:\n  {\n    \"field_id\": (unique ID for the field),\n    \"page\": (page number, 1-based),\n    \"type\": \"checkbox\",\n    \"checked_value\": (Set the field to this value to check the checkbox),\n    \"unchecked_value\": (Set the field to this value to uncheck the checkbox),\n  },\n  // Radio groups have a \"radio_options\" list with the possible choices.\n  {\n    \"field_id\": (unique ID for the field),\n    \"page\": (page number, 1-based),\n    \"type\": \"radio_group\",\n    \"radio_options\": [\n      {\n        \"value\": (set the field to this value to select this radio option),\n        \"rect\": (bounding box for the radio button for this option)\n      },\n      // Other radio options\n    ]\n  },\n  // Multiple choice fields have a \"choice_options\" list with the possible choices:\n  {\n    \"field_id\": (unique ID for the field),\n    \"page\": (page number, 1-based),\n    \"type\": \"choice\",\n    \"choice_options\": [\n      {\n        \"value\": (set the field to this value to select this option),\n        \"text\": (display text of the option)\n      },\n      // Other choice options\n    ],\n  }\n]\n```",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "- Create a `field_values.json` file in this format with the values to be entered for each field:\n```\n[\n  {\n    \"field_id\": \"last_name\", // Must match the field_id from `extract_form_field_info.py`\n    \"description\": \"The user's last name\",\n    \"page\": 1, // Must match the \"page\" value in field_info.json\n    \"value\": \"Simpson\"\n  },\n  {\n    \"field_id\": \"Checkbox12\",\n    \"description\": \"Checkbox to be checked if the user is 18 or over\",\n    \"page\": 1,\n    \"value\": \"/On\" // If this is a checkbox, use its \"checked_value\" value to check it. If it's a radio button group, use one of the \"value\" values in \"radio_options\".\n  },\n  // more fields\n]\n```",
+      "source": "forms.md",
+      "multi": false
+    },
+    {
+      "text": "### Step 2: Create fields.json and validation images (REQUIRED)\n- Create a file named `fields.json` with information for the form fields and bounding boxes in this format:\n```\n{\n  \"pages\": [\n    {\n      \"page_number\": 1,\n      \"image_width\": (first page image width in pixels),\n      \"image_height\": (first page image height in pixels),\n    },\n    {\n      \"page_number\": 2,\n      \"image_width\": (second page image width in pixels),\n      \"image_height\": (second page image height in pixels),\n    }\n    // additional pages\n  ],\n  \"form_fields\": [\n    // Example for a text field.\n    {\n      \"page_number\": 1,\n      \"description\": \"The user's last name should be entered here\",\n      // Bounding boxes are [left, top, right, bottom]. The bounding boxes for the label and text entry should not overlap.\n      \"field_label\": \"Last name\",\n      \"label_bounding_box\": [30, 125, 95, 142],\n      \"entry_bounding_box\": [100, 125, 280, 142],\n      \"entry_text\": {\n        \"text\": \"Johnson\", // This text will be added as an annotation at the entry_bounding_box location\n        \"font_size\": 14, // optional, defaults to 14\n        \"font_color\": \"000000\", // optional, RRGGBB format, defaults to 000000 (black)\n      }\n    },\n    // Example for a checkbox. TARGET THE SQUARE for the entry bounding box, NOT THE TEXT\n    {\n      \"page_number\": 2,\n      \"description\": \"Checkbox that should be checked if the user is over 18\",\n      \"entry_bounding_box\": [140, 525, 155, 540],  // Small box over checkbox square\n      \"field_label\": \"Yes\",\n      \"label_bounding_box\": [100, 525, 132, 540],  // Box containing \"Yes\" text\n      // Use \"X\" to check a checkbox.\n      \"entry_text\": {\n        \"text\": \"X\",\n      }\n    }\n    // additional form field entries\n  ]\n}\n```",
+      "source": "forms.md",
+      "multi": false
+    }
+  ],
+  "evidence": [],
+  "examples": [
+    {
+      "text": "```python\nfrom pypdf import PdfReader, PdfWriter\n\n# Read a PDF\nreader = PdfReader(\"document.pdf\")\nprint(f\"Pages: {len(reader.pages)}\")\n\n# Extract text\ntext = \"\"\nfor page in reader.pages:\n    text += page.extract_text()\n```",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "#### Merge PDFs\n```python\nfrom pypdf import PdfWriter, PdfReader\n\nwriter = PdfWriter()\nfor pdf_file in [\"doc1.pdf\", \"doc2.pdf\", \"doc3.pdf\"]:\n    reader = PdfReader(pdf_file)\n    for page in reader.pages:\n        writer.add_page(page)\n\nwith open(\"merged.pdf\", \"wb\") as output:\n    writer.write(output)\n```",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "#### Split PDF\n```python\nreader = PdfReader(\"input.pdf\")\nfor i, page in enumerate(reader.pages):\n    writer = PdfWriter()\n    writer.add_page(page)\n    with open(f\"page_{i+1}.pdf\", \"wb\") as output:\n        writer.write(output)\n```",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "#### Extract Metadata\n```python\nreader = PdfReader(\"document.pdf\")\nmeta = reader.metadata\nprint(f\"Title: {meta.title}\")\nprint(f\"Author: {meta.author}\")\nprint(f\"Subject: {meta.subject}\")\nprint(f\"Creator: {meta.creator}\")\n```",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "#### Rotate Pages\n```python\nreader = PdfReader(\"input.pdf\")\nwriter = PdfWriter()\n\npage = reader.pages[0]\npage.rotate(90)  # Rotate 90 degrees clockwise\nwriter.add_page(page)\n\nwith open(\"rotated.pdf\", \"wb\") as output:\n    writer.write(output)\n```",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "#### Extract Text with Layout\n```python\nimport pdfplumber\n\nwith pdfplumber.open(\"document.pdf\") as pdf:\n    for page in pdf.pages:\n        text = page.extract_text()\n        print(text)\n```",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "#### Extract Tables\n```python\nwith pdfplumber.open(\"document.pdf\") as pdf:\n    for i, page in enumerate(pdf.pages):\n        tables = page.extract_tables()\n        for j, table in enumerate(tables):\n            print(f\"Table {j+1} on page {i+1}:\")\n            for row in table:\n                print(row)\n```",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "#### Advanced Table Extraction\n```python\nimport pandas as pd\n\nwith pdfplumber.open(\"document.pdf\") as pdf:\n    all_tables = []\n    for page in pdf.pages:\n        tables = page.extract_tables()\n        for table in tables:\n            if table:  # Check if table is not empty\n                df = pd.DataFrame(table[1:], columns=table[0])\n                all_tables.append(df)\n\n# Combine all tables\nif all_tables:\n    combined_df = pd.concat(all_tables, ignore_index=True)\n    combined_df.to_excel(\"extracted_tables.xlsx\", index=False)\n```",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "#### Basic PDF Creation\n```python\nfrom reportlab.lib.pagesizes import letter\nfrom reportlab.pdfgen import canvas\n\nc = canvas.Canvas(\"hello.pdf\", pagesize=letter)\nwidth, height = letter\n\n# Add text\nc.drawString(100, height - 100, \"Hello World!\")\nc.drawString(100, height - 120, \"This is a PDF created with reportlab\")\n\n# Add a line\nc.line(100, height - 140, 400, height - 140)\n\n# Save\nc.save()\n```",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "#### Create PDF with Multiple Pages\n```python\nfrom reportlab.lib.pagesizes = letter\nfrom reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak\nfrom reportlab.lib.styles import getSampleStyleSheet\n\ndoc = SimpleDocTemplate(\"report.pdf\", pagesize=letter)\nstyles = getSampleStyleSheet()\nstory = []\n\n# Add content\ntitle = Paragraph(\"Report Title\", styles['Title'])\nstory.append(title)\nstory.append(Spacer(1, 12))\n\nbody = Paragraph(\"This is the body of the report. \" * 20, styles['Normal'])\nstory.append(body)\nstory.append(PageBreak())\n\n# Page 2\nstory.append(Paragraph(\"Page 2\", styles['Heading1']))\nstory.append(Paragraph(\"Content for page 2\", styles['Normal']))\n\n# Build PDF\ndoc.build(story)\n```",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "### pdftotext (poppler-utils)\n```bash\n# Extract text\npdftotext input.pdf output.txt\n\n# Extract text preserving layout\npdftotext -layout input.pdf output.txt\n\n# Extract specific pages\npdftotext -f 1 -l 5 input.pdf output.txt  # Pages 1-5\n```",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "### qpdf\n```bash\n# Merge PDFs\nqpdf --empty --pages file1.pdf file2.pdf -- merged.pdf\n\n# Split pages\nqpdf input.pdf --pages . 1-5 -- pages1-5.pdf\nqpdf input.pdf --pages . 6-10 -- pages6-10.pdf\n\n# Rotate pages\nqpdf input.pdf output.pdf --rotate=+90:1  # Rotate page 1 by 90 degrees\n\n# Remove password\nqpdf --password=mypassword --decrypt encrypted.pdf decrypted.pdf\n```",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "### pdftk (if available)\n```bash\n# Merge\npdftk file1.pdf file2.pdf cat output merged.pdf\n\n# Split\npdftk input.pdf burst\n\n# Rotate\npdftk input.pdf rotate 1east output rotated.pdf\n```",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "### Extract Text from Scanned PDFs\n```python\n# Requires: pip install pytesseract pdf2image\nimport pytesseract\nfrom pdf2image import convert_from_path\n\n# Convert PDF to images\nimages = convert_from_path('scanned.pdf')\n\n# OCR each page\ntext = \"\"\nfor i, image in enumerate(images):\n    text += f\"Page {i+1}:\n\"\n    text += pytesseract.image_to_string(image)\n    text += \"\n\n\"\n\nprint(text)\n```",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "### Add Watermark\n```python\nfrom pypdf import PdfReader, PdfWriter\n\n# Create watermark (or load existing)\nwatermark = PdfReader(\"watermark.pdf\").pages[0]\n\n# Apply to all pages\nreader = PdfReader(\"document.pdf\")\nwriter = PdfWriter()\n\nfor page in reader.pages:\n    page.merge_page(watermark)\n    writer.add_page(page)\n\nwith open(\"watermarked.pdf\", \"wb\") as output:\n    writer.write(output)\n```",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "### Extract Images\n```bash\n# Using pdfimages (poppler-utils)\npdfimages -j input.pdf output_prefix\n\n# This extracts all images as output_prefix-000.jpg, output_prefix-001.jpg, etc.\n```",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "### Password Protection\n```python\nfrom pypdf import PdfReader, PdfWriter\n\nreader = PdfReader(\"input.pdf\")\nwriter = PdfWriter()\n\nfor page in reader.pages:\n    writer.add_page(page)\n\n# Add password\nwriter.encrypt(\"userpassword\", \"ownerpassword\")\n\nwith open(\"encrypted.pdf\", \"wb\") as output:\n    writer.write(output)\n```",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "### Render PDF to Images\n```python\nimport pypdfium2 as pdfium\nfrom PIL import Image\n\n# Load PDF\npdf = pdfium.PdfDocument(\"document.pdf\")\n\n# Render page to image\npage = pdf[0]  # First page\nbitmap = page.render(\n```",
+      "source": "reference.md (summary)",
+      "multi": false
+    }
+  ],
+  "notes": [
+    {
+      "text": "name: pdf\ndescription: Comprehensive PDF manipulation toolkit for extracting text and tables, creating new PDFs, merging/splitting documents, and handling forms. When Claude needs to fill in a PDF form or programmatically process, generate, or analyze PDF documents at scale.\nlicense: Proprietary. LICENSE.txt has complete terms",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "For advanced pypdfium2 usage, see reference.md\n- For JavaScript libraries (pdf-lib), see reference.md\n- If you need to fill out a PDF form, follow the instructions in forms.md\n- For troubleshooting guides, see reference.md",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "pypdfium2 is a Python binding for PDFium (Chromium's PDF library). It's excellent for fast PDF rendering, image generation, and serves as a PyMuPDF replacement.",
+      "source": "reference.md (summary)",
+      "multi": false
+    },
+    {
+      "text": "# Script to check that the `fields.json` file that Claude creates when analyzing PDFs\ndoes not have overlapping bounding boxes. See forms.md.",
+      "source": "scripts/check_bounding_boxes.py (summary)",
+      "multi": false
+    },
+    {
+      "text": "# Script for Claude to run to determine whether a PDF has fillable form fields. See forms.md.",
+      "source": "scripts/check_fillable_fields.py (summary)",
+      "multi": false
+    },
+    {
+      "text": "# Converts each page of a PDF to a PNG image.",
+      "source": "scripts/convert_pdf_to_images.py (summary)",
+      "multi": false
+    },
+    {
+      "text": "# Creates \"validation\" images with rectangles for the bounding box information that\nClaude creates when determining where to add text annotations in PDFs. See forms.md.",
+      "source": "scripts/create_validation_image.py (summary)",
+      "multi": false
+    },
+    {
+      "text": "# Extracts data for the fillable form fields in a PDF and outputs JSON that\nClaude uses to fill the fields. See forms.md.",
+      "source": "scripts/extract_form_field_info.py (summary)",
+      "multi": false
+    },
+    {
+      "text": "# Fills fillable form fields in a PDF. See forms.md.",
+      "source": "scripts/fill_fillable_fields.py (summary)",
+      "multi": false
+    },
+    {
+      "text": "# Fills a PDF by adding text annotations defined in `fields.json`. See forms.md.",
+      "source": "scripts/fill_pdf_form_with_annotations.py (summary)",
+      "multi": false
+    }
+  ]
+}

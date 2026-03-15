@@ -1,0 +1,440 @@
+{
+  "entities": [
+    {
+      "entity_id": "document_pdf",
+      "kind": "Artifact",
+      "type_name": "PDFDocument",
+      "schema_notes": "PDF file used as input for various operations",
+      "provenance_required": false,
+      "provenance": "EXPLICIT",
+      "source_text": "[SKILL.md] reader = PdfReader(\"document.pdf\")",
+      "is_file": true,
+      "file_path": "document.pdf",
+      "from_omit_files": false
+    },
+    {
+      "entity_id": "merged_pdf",
+      "kind": "Artifact",
+      "type_name": "PDFDocument",
+      "schema_notes": "Merged PDF file created from multiple PDF inputs",
+      "provenance_required": false,
+      "provenance": "EXPLICIT",
+      "source_text": "[SKILL.md] with open(\"merged.pdf\", \"wb\") as output",
+      "is_file": true,
+      "file_path": "merged.pdf",
+      "from_omit_files": false
+    },
+    {
+      "entity_id": "page_i_pdf",
+      "kind": "Artifact",
+      "type_name": "PDFDocument",
+      "schema_notes": "Individual PDF page file created during splitting",
+      "provenance_required": false,
+      "provenance": "EXPLICIT",
+      "source_text": "[SKILL.md] with open(f\"page_{i+1}.pdf\", \"wb\") as output",
+      "is_file": true,
+      "file_path": "page_{i+1}.pdf",
+      "from_omit_files": false
+    },
+    {
+      "entity_id": "rotated_pdf",
+      "kind": "Artifact",
+      "type_name": "PDFDocument",
+      "schema_notes": "PDF file with pages rotated",
+      "provenance_required": false,
+      "provenance": "EXPLICIT",
+      "source_text": "[SKILL.md] with open(\"rotated.pdf\", \"wb\") as output",
+      "is_file": true,
+      "file_path": "rotated.pdf",
+      "from_omit_files": false
+    },
+    {
+      "entity_id": "extracted_tables_xlsx",
+      "kind": "Artifact",
+      "type_name": "ExcelDocument",
+      "schema_notes": "Excel file containing tables extracted from a PDF",
+      "provenance_required": false,
+      "provenance": "EXPLICIT",
+      "source_text": "[SKILL.md] combined_df.to_excel(\"extracted_tables.xlsx\", index=False)",
+      "is_file": true,
+      "file_path": "extracted_tables.xlsx",
+      "from_omit_files": false
+    },
+    {
+      "entity_id": "hello_pdf",
+      "kind": "Artifact",
+      "type_name": "PDFDocument",
+      "schema_notes": "PDF file created with ReportLab containing text and graphics",
+      "provenance_required": false,
+      "provenance": "EXPLICIT",
+      "source_text": "[SKILL.md] c = canvas.Canvas(\"hello.pdf\", pagesize=letter)",
+      "is_file": true,
+      "file_path": "hello.pdf",
+      "from_omit_files": false
+    },
+    {
+      "entity_id": "report_pdf",
+      "kind": "Artifact",
+      "type_name": "PDFDocument",
+      "schema_notes": "PDF report created with ReportLab containing structured content",
+      "provenance_required": false,
+      "provenance": "EXPLICIT",
+      "source_text": "[SKILL.md] doc = SimpleDocTemplate(\"report.pdf\", pagesize=letter)",
+      "is_file": true,
+      "file_path": "report.pdf",
+      "from_omit_files": false
+    },
+    {
+      "entity_id": "output_txt",
+      "kind": "Artifact",
+      "type_name": "TextDocument",
+      "schema_notes": "Text file containing extracted text from a PDF",
+      "provenance_required": false,
+      "provenance": "EXPLICIT",
+      "source_text": "[SKILL.md] pdftotext input.pdf output.txt",
+      "is_file": true,
+      "file_path": "output.txt",
+      "from_omit_files": false
+    },
+    {
+      "entity_id": "scanned_pdf_images",
+      "kind": "Artifact",
+      "type_name": "ImageList",
+      "schema_notes": "List of images converted from a scanned PDF",
+      "provenance_required": false,
+      "provenance": "EXPLICIT",
+      "source_text": "[SKILL.md] images = convert_from_path('scanned.pdf')",
+      "is_file": true,
+      "file_path": "",
+      "from_omit_files": false
+    },
+    {
+      "entity_id": "watermarked_pdf",
+      "kind": "Artifact",
+      "type_name": "PDFDocument",
+      "schema_notes": "PDF file with a watermark applied to all pages",
+      "provenance_required": false,
+      "provenance": "EXPLICIT",
+      "source_text": "[SKILL.md] with open(\"watermarked.pdf\", \"wb\") as output",
+      "is_file": true,
+      "file_path": "watermarked.pdf",
+      "from_omit_files": false
+    },
+    {
+      "entity_id": "encrypted_pdf",
+      "kind": "Artifact",
+      "type_name": "PDFDocument",
+      "schema_notes": "PDF file with encryption applied",
+      "provenance_required": false,
+      "provenance": "EXPLICIT",
+      "source_text": "[SKILL.md] with open(\"encrypted.pdf\", \"wb\") as output",
+      "is_file": true,
+      "file_path": "encrypted.pdf",
+      "from_omit_files": false
+    },
+    {
+      "entity_id": "field_info_json",
+      "kind": "Artifact",
+      "type_name": "JSONDocument",
+      "schema_notes": "JSON file containing extracted form field information from a PDF",
+      "provenance_required": false,
+      "provenance": "EXPLICIT",
+      "source_text": "[forms.md] python scripts/extract_form_field_info.py <input.pdf> <field_info.json>",
+      "is_file": true,
+      "file_path": "<field_info.json>",
+      "from_omit_files": false
+    },
+    {
+      "entity_id": "output_directory_images",
+      "kind": "Artifact",
+      "type_name": "ImageDirectory",
+      "schema_notes": "Directory containing images converted from a PDF",
+      "provenance_required": false,
+      "provenance": "EXPLICIT",
+      "source_text": "[forms.md] python scripts/convert_pdf_to_images.py <file.pdf> <output_directory>",
+      "is_file": true,
+      "file_path": "<output_directory>",
+      "from_omit_files": false
+    },
+    {
+      "entity_id": "field_values_json",
+      "kind": "Artifact",
+      "type_name": "JSONDocument",
+      "schema_notes": "JSON file containing values to fill into a PDF form",
+      "provenance_required": false,
+      "provenance": "EXPLICIT",
+      "source_text": "[forms.md] python scripts/fill_fillable_fields.py <input pdf> <field_values.json> <output pdf>",
+      "is_file": true,
+      "file_path": "<field_values.json>",
+      "from_omit_files": false
+    },
+    {
+      "entity_id": "output_image_path",
+      "kind": "Artifact",
+      "type_name": "ImageFile",
+      "schema_notes": "Image file created for validation purposes",
+      "provenance_required": false,
+      "provenance": "EXPLICIT",
+      "source_text": "[forms.md] python scripts/create_validation_image.py <page_number> <path_to_fields.json> <input_image_path> <output_image_path>",
+      "is_file": true,
+      "file_path": "<output_image_path>",
+      "from_omit_files": false
+    },
+    {
+      "entity_id": "json_file",
+      "kind": "Artifact",
+      "type_name": "JSONDocument",
+      "schema_notes": "JSON file used for checking bounding boxes",
+      "provenance_required": false,
+      "provenance": "EXPLICIT",
+      "source_text": "[forms.md] python scripts/check_bounding_boxes.py <JSON file>",
+      "is_file": true,
+      "file_path": "<JSON file>",
+      "from_omit_files": false
+    },
+    {
+      "entity_id": "output_pdf_path",
+      "kind": "Artifact",
+      "type_name": "PDFDocument",
+      "schema_notes": "PDF file with filled form fields and annotations",
+      "provenance_required": false,
+      "provenance": "EXPLICIT",
+      "source_text": "[forms.md] python scripts/fill_pdf_form_with_annotations.py <input_pdf_path> <path_to_fields.json> <output_pdf_path>",
+      "is_file": true,
+      "file_path": "<output_pdf_path>",
+      "from_omit_files": false
+    }
+  ],
+  "workflow_steps": [
+    {
+      "step_id": "step.check_fillable_fields",
+      "description": "Check if the PDF has fillable form fields",
+      "prerequisites": [
+        "document_pdf"
+      ],
+      "produces": [],
+      "is_validation_gate": false,
+      "effects": [
+        "EXEC"
+      ],
+      "execution_mode": "CODE",
+      "tool_hint": "check_fillable_fields",
+      "provenance": "EXPLICIT",
+      "source_text": "Run this script from this file's directory: `python scripts/check_fillable_fields <file.pdf>`"
+    },
+    {
+      "step_id": "step.extract_form_field_info",
+      "description": "Extract form field information from PDF into JSON",
+      "prerequisites": [
+        "document_pdf"
+      ],
+      "produces": [
+        "field_info_json"
+      ],
+      "is_validation_gate": false,
+      "effects": [
+        "EXEC"
+      ],
+      "execution_mode": "CODE",
+      "tool_hint": "extract_form_field_info",
+      "provenance": "EXPLICIT",
+      "source_text": "Run this script from this file's directory: `python scripts/extract_form_field_info.py <input.pdf> <field_info.json>`"
+    },
+    {
+      "step_id": "step.convert_pdf_to_images",
+      "description": "Convert PDF to PNG images for each page",
+      "prerequisites": [
+        "document_pdf"
+      ],
+      "produces": [
+        "output_directory_images"
+      ],
+      "is_validation_gate": false,
+      "effects": [
+        "EXEC"
+      ],
+      "execution_mode": "CODE",
+      "tool_hint": "convert_pdf_to_images",
+      "provenance": "EXPLICIT",
+      "source_text": "Convert the PDF to PNGs (one image for each page) with this script (run from this file's directory): `python scripts/convert_pdf_to_images.py <file.pdf> <output_directory>`"
+    },
+    {
+      "step_id": "step.create_field_values_json",
+      "description": "Create JSON file with values for each form field",
+      "prerequisites": [
+        "field_info_json"
+      ],
+      "produces": [
+        "field_values_json"
+      ],
+      "is_validation_gate": false,
+      "effects": [
+        "WRITE"
+      ],
+      "execution_mode": "LLM_PROMPT",
+      "tool_hint": "",
+      "provenance": "EXPLICIT",
+      "source_text": "Create a `field_values.json` file in this format with the values to be entered for each field"
+    },
+    {
+      "step_id": "step.fill_fillable_fields",
+      "description": "Fill in the PDF form fields using provided values",
+      "prerequisites": [
+        "document_pdf",
+        "field_values_json"
+      ],
+      "produces": [
+        "output_pdf_path"
+      ],
+      "is_validation_gate": true,
+      "effects": [
+        "EXEC"
+      ],
+      "execution_mode": "CODE",
+      "tool_hint": "fill_fillable_fields",
+      "provenance": "EXPLICIT",
+      "source_text": "Run the `fill_fillable_fields.py` script from this file's directory to create a filled-in PDF"
+    },
+    {
+      "step_id": "step.create_fields_json",
+      "description": "Create JSON file with form field information and bounding boxes",
+      "prerequisites": [
+        "output_directory_images"
+      ],
+      "produces": [
+        "json_file"
+      ],
+      "is_validation_gate": false,
+      "effects": [
+        "WRITE"
+      ],
+      "execution_mode": "LLM_PROMPT",
+      "tool_hint": "",
+      "provenance": "EXPLICIT",
+      "source_text": "Create a file named `fields.json` with information for the form fields and bounding boxes"
+    },
+    {
+      "step_id": "step.create_validation_images",
+      "description": "Create validation images for each page using fields.json",
+      "prerequisites": [
+        "json_file",
+        "output_directory_images"
+      ],
+      "produces": [
+        "output_image_path"
+      ],
+      "is_validation_gate": false,
+      "effects": [
+        "EXEC"
+      ],
+      "execution_mode": "CODE",
+      "tool_hint": "create_validation_image",
+      "provenance": "EXPLICIT",
+      "source_text": "Create validation images by running this script from this file's directory for each page"
+    },
+    {
+      "step_id": "step.check_bounding_boxes",
+      "description": "Verify bounding boxes in fields.json for intersections and size",
+      "prerequisites": [
+        "json_file"
+      ],
+      "produces": [],
+      "is_validation_gate": true,
+      "effects": [
+        "EXEC"
+      ],
+      "execution_mode": "CODE",
+      "tool_hint": "check_bounding_boxes",
+      "provenance": "EXPLICIT",
+      "source_text": "Verify that none of bounding boxes intersect and that the entry bounding boxes are tall enough by checking the fields.json file with the `check_bounding_boxes.py` script"
+    },
+    {
+      "step_id": "step.fill_pdf_form_with_annotations",
+      "description": "Add annotations to the PDF using fields.json",
+      "prerequisites": [
+        "document_pdf",
+        "json_file"
+      ],
+      "produces": [
+        "output_pdf_path"
+      ],
+      "is_validation_gate": false,
+      "effects": [
+        "EXEC"
+      ],
+      "execution_mode": "CODE",
+      "tool_hint": "fill_pdf_form_with_annotations",
+      "provenance": "EXPLICIT",
+      "source_text": "Run this script from this file's directory to create a filled-out PDF using the information in fields.json"
+    }
+  ],
+  "interaction_requirements": [],
+  "alternative_flows": [
+    {
+      "flow_id": "alt-001",
+      "condition": "PDF does not have fillable form fields",
+      "description": "Manually determine where data should be added and create text annotations",
+      "steps": [
+        {
+          "description": "Convert PDF to PNG images and determine field bounding boxes",
+          "execution_mode": "LLM_PROMPT",
+          "tool_hint": "",
+          "source_text": "Convert the PDF to PNG images and determine field bounding boxes."
+        },
+        {
+          "description": "Create JSON file with field information and validation images",
+          "execution_mode": "LLM_PROMPT",
+          "tool_hint": "",
+          "source_text": "Create a JSON file with field information and validation images showing the bounding boxes."
+        },
+        {
+          "description": "Validate the bounding boxes",
+          "execution_mode": "LLM_PROMPT",
+          "tool_hint": "",
+          "source_text": "Validate the the bounding boxes."
+        },
+        {
+          "description": "Use the bounding boxes to fill in the form",
+          "execution_mode": "LLM_PROMPT",
+          "tool_hint": "",
+          "source_text": "Use the bounding boxes to fill in the form."
+        }
+      ],
+      "source_text": "If the PDF doesn't have fillable form fields, you'll need to visually determine where the data should be added and create text annotations. Follow the below steps *exactly*. You MUST perform all of these steps to ensure that the the form is accurately completed.",
+      "provenance": "EXPLICIT"
+    }
+  ],
+  "exception_flows": [
+    {
+      "flow_id": "exc-001",
+      "condition": "fill_fillable_fields.py script prints error messages",
+      "log_ref": "",
+      "steps": [
+        {
+          "description": "Correct the appropriate fields and try again",
+          "execution_mode": "LLM_PROMPT",
+          "tool_hint": "",
+          "source_text": "This script will verify that the field IDs and values you provide are valid; if it prints error messages, correct the appropriate fields and try again."
+        }
+      ],
+      "source_text": "This script will verify that the field IDs and values you provide are valid; if it prints error messages, correct the appropriate fields and try again.",
+      "provenance": "EXPLICIT"
+    },
+    {
+      "flow_id": "exc-002",
+      "condition": "check_bounding_boxes.py script finds errors",
+      "log_ref": "",
+      "steps": [
+        {
+          "description": "Reanalyze the relevant fields, adjust the bounding boxes, and iterate until there are no remaining errors",
+          "execution_mode": "LLM_PROMPT",
+          "tool_hint": "",
+          "source_text": "If there are errors, reanalyze the relevant fields, adjust the bounding boxes, and iterate until there are no remaining errors."
+        }
+      ],
+      "source_text": "If there are errors, reanalyze the relevant fields, adjust the bounding boxes, and iterate until there are no remaining errors.",
+      "provenance": "EXPLICIT"
+    }
+  ],
+  "needs_review_items": []
+}

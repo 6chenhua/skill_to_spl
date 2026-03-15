@@ -1,0 +1,310 @@
+[
+  {
+    "clause_id": "c-001",
+    "original_text": "If you need to fill out a PDF form, first check to see if the PDF has fillable form fields.",
+    "source_section": "WORKFLOW",
+    "source_file": "forms.md",
+    "scores": {
+      "O": 2,
+      "A": 3,
+      "F": 3,
+      "C": 0,
+      "R": 1,
+      "V": 2
+    },
+    "S_det": 2,
+    "S_proc": 2,
+    "classification": "COMPILABLE_MEDIUM",
+    "clause_type": "step",
+    "risk_override": false,
+    "downgraded": false,
+    "confidence": 0.8,
+    "needs_review": false,
+    "enforcement_backends": [
+      "require_review_gate",
+      "evidence_requirement",
+      "parameterized_check"
+    ],
+    "score_rationale": "Checking for fillable fields is a clear, observable step that can be executed with a script. It is formalizable and verifiable through script output."
+  },
+  {
+    "clause_id": "c-002",
+    "original_text": "Run this script from this file's directory: `python scripts/check_fillable_fields <file.pdf>`",
+    "source_section": "WORKFLOW",
+    "source_file": "forms.md",
+    "scores": {
+      "O": 3,
+      "A": 3,
+      "F": 3,
+      "C": 0,
+      "R": 1,
+      "V": 3
+    },
+    "S_det": 3,
+    "S_proc": 3,
+    "classification": "COMPILABLE_MEDIUM",
+    "clause_type": "step",
+    "risk_override": false,
+    "downgraded": true,
+    "confidence": 1.0,
+    "needs_review": false,
+    "enforcement_backends": [
+      "require_review_gate",
+      "evidence_requirement",
+      "parameterized_check"
+    ],
+    "score_rationale": "Running a script is a deterministic, observable, and verifiable action. It is directly actionable and formalizable."
+  },
+  {
+    "clause_id": "c-003",
+    "original_text": "If the PDF has fillable form fields: Run this script from this file's directory: `python scripts/extract_form_field_info.py <input.pdf> <field_info.json>`.",
+    "source_section": "WORKFLOW",
+    "source_file": "forms.md",
+    "scores": {
+      "O": 3,
+      "A": 3,
+      "F": 3,
+      "C": 0,
+      "R": 1,
+      "V": 3
+    },
+    "S_det": 3,
+    "S_proc": 3,
+    "classification": "COMPILABLE_MEDIUM",
+    "clause_type": "step",
+    "risk_override": false,
+    "downgraded": true,
+    "confidence": 1.0,
+    "needs_review": false,
+    "enforcement_backends": [
+      "require_review_gate",
+      "evidence_requirement",
+      "parameterized_check"
+    ],
+    "score_rationale": "Running a script is a deterministic, observable, and verifiable action. It is directly actionable and formalizable."
+  },
+  {
+    "clause_id": "c-004",
+    "original_text": "Convert the PDF to PNGs (one image for each page) with this script (run from this file's directory): `python scripts/convert_pdf_to_images.py <file.pdf> <output_directory>`",
+    "source_section": "WORKFLOW",
+    "source_file": "forms.md",
+    "scores": {
+      "O": 3,
+      "A": 3,
+      "F": 3,
+      "C": 0,
+      "R": 1,
+      "V": 3
+    },
+    "S_det": 3,
+    "S_proc": 3,
+    "classification": "COMPILABLE_MEDIUM",
+    "clause_type": "step",
+    "risk_override": false,
+    "downgraded": true,
+    "confidence": 1.0,
+    "needs_review": false,
+    "enforcement_backends": [
+      "require_review_gate",
+      "evidence_requirement",
+      "parameterized_check"
+    ],
+    "score_rationale": "Running a script is a deterministic, observable, and verifiable action. It is directly actionable and formalizable."
+  },
+  {
+    "clause_id": "c-005",
+    "original_text": "Create a `field_values.json` file in this format with the values to be entered for each field.",
+    "source_section": "WORKFLOW",
+    "source_file": "forms.md",
+    "scores": {
+      "O": 1,
+      "A": 2,
+      "F": 2,
+      "C": 1,
+      "R": 2,
+      "V": 1
+    },
+    "S_det": 1,
+    "S_proc": 1,
+    "classification": "COMPILABLE_SOFT",
+    "clause_type": "step",
+    "risk_override": false,
+    "downgraded": false,
+    "confidence": 0.36,
+    "needs_review": false,
+    "enforcement_backends": [
+      "rubric_scoring",
+      "heuristic_linter",
+      "llm_judge_warn"
+    ],
+    "score_rationale": "Creating a JSON file is actionable and formalizable, but verification requires human review of the content."
+  },
+  {
+    "clause_id": "c-006",
+    "original_text": "Run the `fill_fillable_fields.py` script from this file's directory to create a filled-in PDF.",
+    "source_section": "WORKFLOW",
+    "source_file": "forms.md",
+    "scores": {
+      "O": 3,
+      "A": 3,
+      "F": 3,
+      "C": 0,
+      "R": 2,
+      "V": 3
+    },
+    "S_det": 3,
+    "S_proc": 3,
+    "classification": "COMPILABLE_MEDIUM",
+    "clause_type": "step",
+    "risk_override": false,
+    "downgraded": true,
+    "confidence": 1.0,
+    "needs_review": false,
+    "enforcement_backends": [
+      "require_review_gate",
+      "evidence_requirement",
+      "parameterized_check"
+    ],
+    "score_rationale": "Running a script is a deterministic, observable, and verifiable action. It is directly actionable and formalizable."
+  },
+  {
+    "clause_id": "c-007",
+    "original_text": "If the PDF doesn't have fillable form fields, you'll need to visually determine where the data should be added and create text annotations.",
+    "source_section": "WORKFLOW",
+    "source_file": "forms.md",
+    "scores": {
+      "O": 1,
+      "A": 2,
+      "F": 1,
+      "C": 2,
+      "R": 2,
+      "V": 1
+    },
+    "S_det": 1,
+    "S_proc": 1,
+    "classification": "COMPILABLE_SOFT",
+    "clause_type": "step",
+    "risk_override": false,
+    "downgraded": false,
+    "confidence": 0.24,
+    "needs_review": false,
+    "enforcement_backends": [
+      "rubric_scoring",
+      "heuristic_linter",
+      "llm_judge_warn"
+    ],
+    "score_rationale": "Visual determination is subjective and requires human judgment, making it less formalizable and verifiable."
+  },
+  {
+    "clause_id": "c-008",
+    "original_text": "You MUST perform all of these steps to ensure that the form is accurately completed.",
+    "source_section": "WORKFLOW",
+    "source_file": "forms.md",
+    "scores": {
+      "O": 1,
+      "A": 3,
+      "F": 2,
+      "C": 0,
+      "R": 3,
+      "V": 1
+    },
+    "S_det": 1,
+    "S_proc": 1,
+    "classification": "COMPILABLE_MEDIUM",
+    "clause_type": "rule",
+    "risk_override": true,
+    "downgraded": false,
+    "confidence": 0.6,
+    "needs_review": true,
+    "enforcement_backends": [
+      "require_review_gate",
+      "evidence_requirement",
+      "parameterized_check"
+    ],
+    "score_rationale": "The requirement to perform all steps is clear and actionable, but verification is subjective."
+  },
+  {
+    "clause_id": "c-009",
+    "original_text": "The label and entry bounding boxes MUST NOT INTERSECT; the text entry box should only include the area where data should be entered.",
+    "source_section": "WORKFLOW",
+    "source_file": "forms.md",
+    "scores": {
+      "O": 2,
+      "A": 3,
+      "F": 3,
+      "C": 0,
+      "R": 2,
+      "V": 2
+    },
+    "S_det": 2,
+    "S_proc": 2,
+    "classification": "COMPILABLE_MEDIUM",
+    "clause_type": "rule",
+    "risk_override": false,
+    "downgraded": false,
+    "confidence": 0.8,
+    "needs_review": false,
+    "enforcement_backends": [
+      "require_review_gate",
+      "evidence_requirement",
+      "parameterized_check"
+    ],
+    "score_rationale": "Non-intersection of bounding boxes is formalizable and can be checked with scripts, but requires visual confirmation."
+  },
+  {
+    "clause_id": "c-010",
+    "original_text": "Entry bounding boxes must be tall and wide enough to contain their text.",
+    "source_section": "WORKFLOW",
+    "source_file": "forms.md",
+    "scores": {
+      "O": 1,
+      "A": 2,
+      "F": 2,
+      "C": 1,
+      "R": 2,
+      "V": 1
+    },
+    "S_det": 1,
+    "S_proc": 1,
+    "classification": "COMPILABLE_SOFT",
+    "clause_type": "rule",
+    "risk_override": false,
+    "downgraded": false,
+    "confidence": 0.36,
+    "needs_review": false,
+    "enforcement_backends": [
+      "rubric_scoring",
+      "heuristic_linter",
+      "llm_judge_warn"
+    ],
+    "score_rationale": "This is formalizable but requires human judgment to verify the adequacy of bounding box size."
+  },
+  {
+    "clause_id": "c-011",
+    "original_text": "CRITICAL: Do not proceed without visually inspecting validation images.",
+    "source_section": "WORKFLOW",
+    "source_file": "forms.md",
+    "scores": {
+      "O": 1,
+      "A": 3,
+      "F": 2,
+      "C": 0,
+      "R": 3,
+      "V": 1
+    },
+    "S_det": 1,
+    "S_proc": 1,
+    "classification": "COMPILABLE_MEDIUM",
+    "clause_type": "rule",
+    "risk_override": true,
+    "downgraded": false,
+    "confidence": 0.6,
+    "needs_review": true,
+    "enforcement_backends": [
+      "require_review_gate",
+      "evidence_requirement",
+      "parameterized_check"
+    ],
+    "score_rationale": "Visual inspection is critical and actionable, but verification is subjective and requires human judgment."
+  }
+]

@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "skill-to-cnlp"
+version = "0.1.0"
+description = "Normalize heterogeneous Claude skill packages into SPL/CNL-P specifications"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.40.0",
+    "pyyaml>=6.0",
+    "hypothesis>=6.0.0",
+]
+
+[project.scripts]
+skill-to-cnlp = "skill_to_cnlp.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["skill_to_cnlp*"]

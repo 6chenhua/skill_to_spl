@@ -1,0 +1,68 @@
+{
+  "forms.md": {
+    "role": "core_workflow",
+    "read_priority": 1,
+    "must_read_for_normalization": true,
+    "reasoning": "SKILL.md uses an imperative tone: 'read forms.md and follow its instructions'."
+  },
+  "reference.md": {
+    "role": "supplementary",
+    "read_priority": 2,
+    "must_read_for_normalization": false,
+    "reasoning": "SKILL.md uses an optional tone: 'For advanced features, see reference.md'."
+  },
+  "scripts\\check_bounding_boxes.py": {
+    "role": "core_script",
+    "read_priority": 2,
+    "must_read_for_normalization": false,
+    "reasoning": "Referenced by forms.md, which is a priority-1 document."
+  },
+  "scripts\\check_bounding_boxes_test.py": {
+    "role": "unreferenced",
+    "read_priority": 3,
+    "must_read_for_normalization": false,
+    "reasoning": "This script is not referenced by any document."
+  },
+  "scripts\\check_fillable_fields.py": {
+    "role": "core_script",
+    "read_priority": 2,
+    "must_read_for_normalization": false,
+    "reasoning": "Referenced by forms.md, which is a priority-1 document."
+  },
+  "scripts\\convert_pdf_to_images.py": {
+    "role": "core_script",
+    "read_priority": 2,
+    "must_read_for_normalization": false,
+    "reasoning": "Referenced by forms.md, which is a priority-1 document."
+  },
+  "scripts\\create_validation_image.py": {
+    "role": "core_script",
+    "read_priority": 2,
+    "must_read_for_normalization": false,
+    "reasoning": "Referenced by forms.md, which is a priority-1 document."
+  },
+  "scripts\\extract_form_field_info.py": {
+    "role": "core_script",
+    "read_priority": 2,
+    "must_read_for_normalization": false,
+    "reasoning": "Referenced by forms.md, which is a priority-1 document."
+  },
+  "scripts\\fill_fillable_fields.py": {
+    "role": "core_script",
+    "read_priority": 2,
+    "must_read_for_normalization": false,
+    "reasoning": "Referenced by forms.md, which is a priority-1 document."
+  },
+  "scripts\\fill_pdf_form_with_annotations.py": {
+    "role": "core_script",
+    "read_priority": 2,
+    "must_read_for_normalization": false,
+    "reasoning": "Referenced by forms.md, which is a priority-1 document."
+  },
+  "SKILL.md": {
+    "role": "primary",
+    "read_priority": 1,
+    "must_read_for_normalization": true,
+    "reasoning": "SKILL.md is the fixed anchor of every skill package."
+  }
+}

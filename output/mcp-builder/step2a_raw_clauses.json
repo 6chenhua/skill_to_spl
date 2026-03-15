@@ -1,0 +1,192 @@
+[
+  {
+    "clause_id": "c-001",
+    "source_section": "Phase 1: Deep Research and Planning",
+    "source_file": "SKILL.md",
+    "original_text": "When uncertain, prioritize comprehensive API coverage.",
+    "is_normative": true,
+    "clause_type": "rule",
+    "split": false,
+    "sub_clauses": [],
+    "scores": {
+      "O": 1,
+      "A": 1,
+      "F": 1,
+      "C": 2,
+      "R": 1,
+      "V": 1
+    },
+    "score_rationale": "Prioritization is a guideline; observability and verifiability rely on subjective judgment."
+  },
+  {
+    "clause_id": "c-002",
+    "source_section": "Phase 1: Deep Research and Planning",
+    "source_file": "SKILL.md",
+    "original_text": "Use consistent prefixes (e.g., `github_create_issue`, `github_list_repos`) and action-oriented naming.",
+    "is_normative": true,
+    "clause_type": "rule",
+    "split": false,
+    "sub_clauses": [],
+    "scores": {
+      "O": 2,
+      "A": 2,
+      "F": 2,
+      "C": 1,
+      "R": 1,
+      "V": 2
+    },
+    "score_rationale": "Naming conventions can be checked with heuristics; action-oriented naming is somewhat subjective."
+  },
+  {
+    "clause_id": "c-003",
+    "source_section": "Phase 1: Deep Research and Planning",
+    "source_file": "SKILL.md",
+    "original_text": "Error messages should guide agents toward solutions with specific suggestions and next steps.",
+    "is_normative": true,
+    "clause_type": "rule",
+    "split": false,
+    "sub_clauses": [],
+    "scores": {
+      "O": 1,
+      "A": 1,
+      "F": 1,
+      "C": 2,
+      "R": 1,
+      "V": 1
+    },
+    "score_rationale": "Guidance is subjective; observability and verifiability rely on human judgment."
+  },
+  {
+    "clause_id": "c-004",
+    "source_section": "Phase 1: Deep Research and Planning",
+    "source_file": "SKILL.md",
+    "original_text": "Start with the sitemap to find relevant pages: `https://modelcontextprotocol.io/sitemap.xml`",
+    "is_normative": true,
+    "clause_type": "step",
+    "split": false,
+    "sub_clauses": [],
+    "scores": {
+      "O": 3,
+      "A": 3,
+      "F": 3,
+      "C": 0,
+      "R": 1,
+      "V": 3
+    },
+    "score_rationale": "Deterministic step with clear URL; fully observable and verifiable."
+  },
+  {
+    "clause_id": "c-005",
+    "source_section": "Phase 1: Deep Research and Planning",
+    "source_file": "SKILL.md",
+    "original_text": "Then fetch specific pages with `.md` suffix for markdown format (e.g., `https://modelcontextprotocol.io/specification/draft.md`).",
+    "is_normative": true,
+    "clause_type": "step",
+    "split": false,
+    "sub_clauses": [],
+    "scores": {
+      "O": 3,
+      "A": 3,
+      "F": 3,
+      "C": 0,
+      "R": 1,
+      "V": 3
+    },
+    "score_rationale": "Deterministic step with clear URL; fully observable and verifiable."
+  },
+  {
+    "clause_id": "c-006",
+    "source_section": "Phase 2: Implementation",
+    "source_file": "SKILL.md",
+    "original_text": "Use Zod (TypeScript) or Pydantic (Python)",
+    "is_normative": true,
+    "clause_type": "rule",
+    "split": false,
+    "sub_clauses": [],
+    "scores": {
+      "O": 2,
+      "A": 2,
+      "F": 2,
+      "C": 1,
+      "R": 1,
+      "V": 2
+    },
+    "score_rationale": "Choice of libraries can be checked with heuristics; somewhat subjective."
+  },
+  {
+    "clause_id": "c-007",
+    "source_section": "Phase 2: Implementation",
+    "source_file": "SKILL.md",
+    "original_text": "Include constraints and clear descriptions",
+    "is_normative": true,
+    "clause_type": "rule",
+    "split": false,
+    "sub_clauses": [],
+    "scores": {
+      "O": 1,
+      "A": 1,
+      "F": 1,
+      "C": 2,
+      "R": 1,
+      "V": 1
+    },
+    "score_rationale": "Subjective guidance; observability and verifiability rely on human judgment."
+  },
+  {
+    "clause_id": "c-008",
+    "source_section": "Phase 3: Review and Test",
+    "source_file": "SKILL.md",
+    "original_text": "Run `npm run build` to verify compilation",
+    "is_normative": true,
+    "clause_type": "step",
+    "split": false,
+    "sub_clauses": [],
+    "scores": {
+      "O": 3,
+      "A": 3,
+      "F": 3,
+      "C": 0,
+      "R": 1,
+      "V": 3
+    },
+    "score_rationale": "Deterministic step with clear command; fully observable and verifiable."
+  },
+  {
+    "clause_id": "c-009",
+    "source_section": "Phase 3: Review and Test",
+    "source_file": "SKILL.md",
+    "original_text": "Test with MCP Inspector: `npx @modelcontextprotocol/inspector`",
+    "is_normative": true,
+    "clause_type": "step",
+    "split": false,
+    "sub_clauses": [],
+    "scores": {
+      "O": 3,
+      "A": 3,
+      "F": 3,
+      "C": 0,
+      "R": 1,
+      "V": 3
+    },
+    "score_rationale": "Deterministic step with clear command; fully observable and verifiable."
+  },
+  {
+    "clause_id": "c-010",
+    "source_section": "Phase 4: Create Evaluations",
+    "source_file": "reference/evaluation.md",
+    "original_text": "Questions must be READ-ONLY, INDEPENDENT, NON-DESTRUCTIVE",
+    "is_normative": true,
+    "clause_type": "rule",
+    "split": false,
+    "sub_clauses": [],
+    "scores": {
+      "O": 2,
+      "A": 2,
+      "F": 2,
+      "C": 1,
+      "R": 2,
+      "V": 2
+    },
+    "score_rationale": "Guideline for question creation; partially checkable with heuristics."
+  }
+]

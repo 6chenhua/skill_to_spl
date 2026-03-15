@@ -1,0 +1,56 @@
+{
+  "reference\\evaluation.md": {
+    "role": "core_workflow",
+    "read_priority": 1,
+    "must_read_for_normalization": true,
+    "reasoning": "SKILL.md uses imperative language: 'Load Evaluation Guide for complete evaluation guidelines.'"
+  },
+  "reference\\mcp_best_practices.md": {
+    "role": "core_workflow",
+    "read_priority": 1,
+    "must_read_for_normalization": true,
+    "reasoning": "SKILL.md uses imperative language: 'View Best Practices - Core guidelines.'"
+  },
+  "reference\\node_mcp_server.md": {
+    "role": "core_workflow",
+    "read_priority": 1,
+    "must_read_for_normalization": true,
+    "reasoning": "SKILL.md uses imperative language: 'TypeScript Implementation Guide - Complete TypeScript guide.'"
+  },
+  "reference\\python_mcp_server.md": {
+    "role": "core_workflow",
+    "read_priority": 1,
+    "must_read_for_normalization": true,
+    "reasoning": "SKILL.md uses imperative language: 'Python Implementation Guide - Complete Python/FastMCP guide.'"
+  },
+  "scripts\\connections.py": {
+    "role": "unreferenced",
+    "read_priority": 3,
+    "must_read_for_normalization": false,
+    "reasoning": "This file is not referenced by any document."
+  },
+  "scripts\\evaluation.py": {
+    "role": "core_script",
+    "read_priority": 2,
+    "must_read_for_normalization": false,
+    "reasoning": "Referenced by the core_workflow document evaluation.md."
+  },
+  "scripts\\example_evaluation.xml": {
+    "role": "unreferenced",
+    "read_priority": 3,
+    "must_read_for_normalization": false,
+    "reasoning": "This file is not referenced by any document."
+  },
+  "scripts\\requirements.txt": {
+    "role": "core_script",
+    "read_priority": 2,
+    "must_read_for_normalization": false,
+    "reasoning": "Referenced by the core_workflow document evaluation.md."
+  },
+  "SKILL.md": {
+    "role": "primary",
+    "read_priority": 1,
+    "must_read_for_normalization": true,
+    "reasoning": "SKILL.md is the fixed anchor of every skill package."
+  }
+}

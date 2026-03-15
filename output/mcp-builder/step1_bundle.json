@@ -1,0 +1,253 @@
+{
+  "intent": [
+    {
+      "text": "Create MCP (Model Context Protocol) servers that enable LLMs to interact with external services through well-designed tools. The quality of an MCP server is measured by how well it enables LLMs to accomplish real-world tasks.",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "This document provides guidance on creating comprehensive evaluations for MCP servers. Evaluations test whether LLMs can effectively use your MCP server to answer realistic, complex questions using only the tools provided.",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    }
+  ],
+  "workflow": [
+    {
+      "text": "Creating a high-quality MCP server involves four main phases:\n\n### Phase 1: Deep Research and Planning\n\n#### 1.1 Understand Modern MCP Design\n\n**API Coverage vs. Workflow Tools:**\nBalance comprehensive API endpoint coverage with specialized workflow tools. Workflow tools can be more convenient for specific tasks, while comprehensive coverage gives agents flexibility to compose operations. Performance varies by client—some clients benefit from code execution that combines basic tools, while others work better with higher-level workflows. When uncertain, prioritize comprehensive API coverage.\n\n**Tool Naming and Discoverability:**\nClear, descriptive tool names help agents find the right tools quickly. Use consistent prefixes (e.g., `github_create_issue`, `github_list_repos`) and action-oriented naming.\n\n**Context Management:**\nAgents benefit from concise tool descriptions and the ability to filter/paginate results. Design tools that return focused, relevant data. Some clients support code execution which can help agents filter and process data efficiently.\n\n**Actionable Error Messages:**\nError messages should guide agents toward solutions with specific suggestions and next steps.\n\n#### 1.2 Study MCP Protocol Documentation\n\n**Navigate the MCP specification:**\n\nStart with the sitemap to find relevant pages: `https://modelcontextprotocol.io/sitemap.xml`\n\nThen fetch specific pages with `.md` suffix for markdown format (e.g., `https://modelcontextprotocol.io/specification/draft.md`).\n\nKey pages to review:\n- Specification overview and architecture\n- Transport mechanisms (streamable HTTP, stdio)\n- Tool, resource, and prompt definitions\n\n#### 1.3 Study Framework Documentation\n\n**Recommended stack:**\n- **Language**: TypeScript (high-quality SDK support and good compatibility in many execution environments e.g. MCPB. Plus AI models are good at generating TypeScript code, benefiting from its broad usage, static typing and good linting tools)\n- **Transport**: Streamable HTTP for remote servers, using stateless JSON (simpler to scale and maintain, as opposed to stateful sessions and streaming responses). stdio for local servers.\n\n**Load framework documentation:**\n\n- **MCP Best Practices**: [📋 View Best Practices](./reference/mcp_best_practices.md) - Core guidelines\n\n**For TypeScript (recommended):**\n- **TypeScript SDK**: Use WebFetch to load `https://raw.githubusercontent.com/modelcontextprotocol/typescript-sdk/main/README.md`\n- [⚡ TypeScript Guide](./reference/node_mcp_server.md) - TypeScript patterns and examples\n\n**For Python:**\n- **Python SDK**: Use WebFetch to load `https://raw.githubusercontent.com/modelcontextprotocol/python-sdk/main/README.md`\n- [🐍 Python Guide](./reference/python_mcp_server.md) - Python patterns and examples\n\n#### 1.4 Plan Your Implementation\n\n**Understand the API:**\nReview the service's API documentation to identify key endpoints, authentication requirements, and data models. Use web search and WebFetch as needed.\n\n**Tool Selection:**\nPrioritize comprehensive API coverage. List endpoints to implement, starting with the most common operations.",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "### Phase 2: Implementation\n\n#### 2.1 Set Up Project Structure\n\nSee language-specific guides for project setup:\n- [⚡ TypeScript Guide](./reference/node_mcp_server.md) - Project structure, package.json, tsconfig.json\n- [🐍 Python Guide](./reference/python_mcp_server.md) - Module organization, dependencies\n\n#### 2.2 Implement Core Infrastructure\n\nCreate shared utilities:\n- API client with authentication\n- Error handling helpers\n- Response formatting (JSON/Markdown)\n- Pagination support\n\n#### 2.3 Implement Tools\n\nFor each tool:\n\n**Input Schema:**\n- Use Zod (TypeScript) or Pydantic (Python)\n- Include constraints and clear descriptions\n- Add examples in field descriptions\n\n**Output Schema:**\n- Define `outputSchema` where possible for structured data\n- Use `structuredContent` in tool responses (TypeScript SDK feature)\n- Helps clients understand and process tool outputs\n\n**Tool Description:**\n- Concise summary of functionality\n- Parameter descriptions\n- Return type schema\n\n**Implementation:**\n- Async/await for I/O operations\n- Proper error handling with actionable messages\n- Support pagination where applicable\n- Return both text content and structured data when using modern SDKs\n\n**Annotations:**\n- `readOnlyHint`: true/false\n- `destructiveHint`: true/false\n- `idempotentHint`: true/false\n- `openWorldHint`: true/false",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "### Phase 3: Review and Test\n\n#### 3.1 Code Quality\n\nReview for:\n- No duplicated code (DRY principle)\n- Consistent error handling\n- Full type coverage\n- Clear tool descriptions\n\n#### 3.2 Build and Test\n\n**TypeScript:**\n- Run `npm run build` to verify compilation\n- Test with MCP Inspector: `npx @modelcontextprotocol/inspector`\n\n**Python:**\n- Verify syntax: `python -m py_compile your_server.py`\n- Test with MCP Inspector\n\nSee language-specific guides for detailed testing approaches and quality checklists.",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "### Phase 4: Create Evaluations\n\nAfter implementing your MCP server, create comprehensive evaluations to test its effectiveness.\n\n**Load [✅ Evaluation Guide](./reference/evaluation.md) for complete evaluation guidelines.**\n\n#### 4.1 Understand Evaluation Purpose\n\nUse evaluations to test whether LLMs can effectively use your MCP server to answer realistic, complex questions.\n\n#### 4.2 Create 10 Evaluation Questions\n\nTo create effective evaluations, follow the process outlined in the evaluation guide:\n\n1. **Tool Inspection**: List available tools and understand their capabilities\n2. **Content Exploration**: Use READ-ONLY operations to explore available data\n3. **Question Generation**: Create 10 complex, realistic questions\n4. **Answer Verification**: Solve each question yourself to verify answers\n\n#### 4.3 Evaluation Requirements\n\nEnsure each question is:\n- **Independent**: Not dependent on other questions\n- **Read-only**: Only non-destructive operations required\n- **Complex**: Requiring multiple tool calls and deep exploration\n- **Realistic**: Based on real use cases humans would care about\n- **Verifiable**: Single, clear answer that can be verified by string comparison\n- **Stable**: Answer won't change over time\n\n#### 4.4 Output Format\n\nCreate an XML file with this structure:\n\n```xml\n<evaluation>\n  <qa_pair>\n    <question>Find discussions about AI model launches with animal codenames. One model needed a specific safety designation that uses the format ASL-X. What number X was being determined for the model named after a spotted wild cat?</question>\n    <answer>3</answer>\n  </qa_pair>\n<!-- More qa_pairs... -->\n</evaluation>\n```",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "## Evaluation Process\n\n### Step 1: Documentation Inspection\n\nRead the documentation of the target API to understand:\n- Available endpoints and functionality\n- If ambiguity exists, fetch additional information from the web\n- Parallelize this step AS MUCH AS POSSIBLE\n- Ensure each subagent is ONLY examining documentation from the file system or on the web\n\n### Step 2: Tool Inspection\n\nList the tools available in the MCP server:\n- Inspect the MCP server directly\n- Understand input/output schemas, docstrings, and descriptions\n- WITHOUT calling the tools themselves at this stage\n\n### Step 3: Developing Understanding\n\nRepeat steps 1 & 2 until you have a good understanding:\n- Iterate multiple times\n- Think about the kinds of tasks you want to create\n- Refine your understanding\n- At NO stage should you READ the code of the MCP server implementation itself\n- Use your intuition and understanding to create reasonable, realistic, but VERY challenging tasks\n\n### Step 4: Read-Only Content Inspection\n\nAfter understanding the API and tools, USE the MCP server tools:\n- Inspect content using READ-ONLY and NON-DESTRUCTIVE operations ONLY\n- Goal: identify specific content (e.g., users, channels, messages, projects, tasks) for creating realistic questions\n- Should NOT call any tools that modify state\n- Will NOT read the code of the MCP server implementation itself\n- Parallelize this step with individual sub-agents pursuing independent explorations\n- Ensure each subagent is only performing READ-ONLY, NON-DESTRUCTIVE, and IDEMPOTENT operations\n- BE CAREFUL: SOME TOOLS may return LOTS OF DATA which would cause you to run out of CONTEXT\n- Make INCREMENTAL, SMALL, AND TARGETED tool calls for exploration\n- In all tool call requests, use the `limit` parameter to limit results (<10)\n- Use pagination\n\n### Step 5: Task Generation\n\nAfter inspecting the content, create 10 human-readable questions:\n- An LLM should be able to answer these with the MCP server\n- Follow all question and answer guidelines above",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    }
+  ],
+  "constraints": [
+    {
+      "text": "license: Complete terms in LICENSE.txt",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "Questions must be READ-ONLY, INDEPENDENT, NON-DESTRUCTIVE\n- Each question requires multiple tool calls (potentially dozens)\n- Answers must be single, verifiable values\n- Answers must be STABLE (won't change over time)",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "1. **Questions MUST be independent**\n   - Each question should NOT depend on the answer to any other question\n   - Should not assume prior write operations from processing another question\n\n2. **Questions MUST require ONLY NON-DESTRUCTIVE AND IDEMPOTENT tool use**\n   - Should not instruct or require modifying state to arrive at the correct answer\n\n3. **Questions must be REALISTIC, CLEAR, CONCISE, and COMPLEX**\n   - Must require another LLM to use multiple (potentially dozens of) tools or steps to answer",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "12. **Questions must be designed so the answer DOES NOT CHANGE**\n    - Do not ask questions that rely on \"current state\" which is dynamic\n    - For example, do not count:\n      - Number of reactions to a post\n      - Number of replies to a thread\n      - Number of members in a channel",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "1. **Answers must be VERIFIABLE via direct string comparison**\n   - If the answer can be re-written in many formats, clearly specify the output format in the QUESTION\n   - Examples: \"Use YYYY/MM/DD.\", \"Respond True or False.\", \"Answer A, B, C, or D and nothing else.\"\n   - Answer should be a single VERIFIABLE value such as:\n     - User ID, user name, display name, first name, last name\n     - Channel ID, channel name\n     - Message ID, string\n     - URL, title\n     - Numerical quantity\n     - Timestamp, datetime\n     - Boolean (for True/False questions)\n     - Email address, phone number\n     - File ID, file name, file extension\n     - Multiple choice answer\n   - Answers must not require special formatting or complex, structured output\n   - Answer will be verified using DIRECT STRING COMPARISON",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "2. **Answers should generally prefer HUMAN-READABLE formats**\n   - Examples: names, first name, last name, datetime, file name, message string, URL, yes/no, true/false, a/b/c/d\n   - Rather than opaque IDs (though IDs are acceptable)\n   - The VAST MAJORITY of answers should be human-readable",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "3. **Answers must be STABLE/STATIONARY**\n   - Look at old content (e.g., conversations that have ended, projects that have launched, questions answered)\n   - Create QUESTIONS based on \"closed\" concepts that will always return the same answer\n   - Questions may ask to consider a fixed time window to insulate from non-stationary answers\n   - Rely on context UNLIKELY to change\n   - Example: if finding a paper name, be SPECIFIC enough so answer is not confused with papers published later",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "4. **Answers must be CLEAR and UNAMBIGUOUS**\n   - Questions must be designed so there is a single, clear answer\n   - Answer can be derived from using the MCP server tools",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "5. **Answers must be DIVERSE**\n   - Answer should be a single VERIFIABLE value in diverse modalities and formats\n   - User concept: user ID, user name, display name, first name, last name, email address, phone number\n   - Channel concept: channel ID, channel name, channel topic\n   - Message concept: message ID, message string, timestamp, month, day, year",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "6. **Answers must NOT be complex structures**\n   - Not a list of values\n   - Not a complex object\n   - Not a list of IDs or strings\n   - Not natural language text\n   - UNLESS the answer can be straightforwardly verified using DIRECT STRING COMPARISON\n   - And can be realistically reproduced\n   - It should be unlikely that an LLM would return the same list in any other order or format",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    }
+  ],
+  "tools": [
+    {
+      "text": "Use when building MCP servers to integrate external APIs or services, whether in Python (FastMCP) or Node/TypeScript (MCP SDK).",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "Recommended stack:\n- **Language**: TypeScript (high-quality SDK support and good compatibility in many execution environments e.g. MCPB. Plus AI models are good at generating TypeScript code, benefiting from its broad usage, static typing and good linting tools)\n- **Transport**: Streamable HTTP for remote servers, using stateless JSON (simpler to scale and maintain, as opposed to stateful sessions and streaming responses). stdio for local servers.",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "Load framework documentation:\n\n- **MCP Best Practices**: [📋 View Best Practices](./reference/mcp_best_practices.md) - Core guidelines\n\n**For TypeScript (recommended):**\n- **TypeScript SDK**: Use WebFetch to load `https://raw.githubusercontent.com/modelcontextprotocol/typescript-sdk/main/README.md`\n- [⚡ TypeScript Guide](./reference/node_mcp_server.md) - TypeScript patterns and examples\n\n**For Python:**\n- **Python SDK**: Use WebFetch to load `https://raw.githubusercontent.com/modelcontextprotocol/python-sdk/main/README.md`\n- [🐍 Python Guide](./reference/python_mcp_server.md) - Python patterns and examples",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "Test with MCP Inspector: `npx @modelcontextprotocol/inspector`",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "See language-specific guides for project setup:\n- [⚡ TypeScript Guide](./reference/node_mcp_server.md) - Project structure, package.json, tsconfig.json\n- [🐍 Python Guide](./reference/python_mcp_server.md) - Module organization, dependencies",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "Load these resources as needed during development:\n\n### Core MCP Documentation (Load First)\n- **MCP Protocol**: Start with sitemap at `https://modelcontextprotocol.io/sitemap.xml`, then fetch specific pages with `.md` suffix\n- [📋 MCP Best Practices](./reference/mcp_best_practices.md) - Universal MCP guidelines including:\n  - Server and tool naming conventions\n  - Response format guidelines (JSON vs Markdown)\n  - Pagination best practices\n  - Transport selection (streamable HTTP vs stdio)\n  - Security and error handling standards\n\n### SDK Documentation (Load During Phase 1/2)\n- **Python SDK**: Fetch from `https://raw.githubusercontent.com/modelcontextprotocol/python-sdk/main/README.md`\n- **TypeScript SDK**: Fetch from `https://raw.githubusercontent.com/modelcontextprotocol/typescript-sdk/main/README.md`\n\n### Language-Specific Implementation Guides (Load During Phase 2)\n- [🐍 Python Implementation Guide](./reference/python_mcp_server.md) - Complete Python/FastMCP guide with:\n  - Server initialization patterns\n  - Pydantic model examples\n  - Tool registration with `@mcp.tool`\n  - Complete working examples\n  - Quality checklist\n\n- [⚡ TypeScript Implementation Guide](./reference/node_mcp_server.md) - Complete TypeScript guide with:\n  - Project structure\n  - Zod schema patterns\n  - Tool registration with `server.registerTool`\n  - Complete working examples\n  - Quality checklist\n\n### Evaluation Guide (Load During Phase 4)\n- [✅ Evaluation Guide](./reference/evaluation.md) - Complete evaluation creation guide with:\n  - Question creation guidelines\n  - Answer verification strategies\n  - XML format specifications\n  - Example questions and answers\n  - Running an evaluation with the provided scripts",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "pip install anthropic mcp",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "python scripts/evaluation.py \\\n  -t stdio \\\n  -c python \\\n  -a my_mcp_server.py \\\n  evaluation.xml",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "python scripts/evaluation.py \\\n  -t stdio \\\n  -c python \\\n  -a my_mcp_server.py \\\n  -e API_KEY=abc123 \\\n  -e DEBUG=true \\\n  evaluation.xml",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "python scripts/evaluation.py \\\n  -t sse \\\n  -u https://example.com/mcp \\\n  -H \"Authorization: Bearer token123\" \\\n  -H \"X-Custom-Header: value\" \\\n  evaluation.xml",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "python scripts/evaluation.py \\\n  -t http \\\n  -u https://example.com/mcp \\\n  -H \"Authorization: Bearer token123\" \\\n  evaluation.xml",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "python scripts/evaluation.py \\\n  -t stdio \\\n  -c python \\\n  -a my_server.py \\\n  -o evaluation_report.md \\\n  evaluation.xml",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "pip install -r scripts/requirements.txt",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "export ANTHROPIC_API_KEY=your_api_key_here",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "python scripts/evaluation.py \\\n  -t stdio \\\n  -c python \\\n  -a github_mcp_server.py \\\n  -e GITHUB_TOKEN=ghp_xxx \\\n  -o github_eval_report.md \\\n  my_evaluation.xml",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    }
+  ],
+  "artifacts": [
+    {
+      "text": "Create an XML file with this structure:\n\n```xml\n<evaluation>\n  <qa_pair>\n    <question>Find discussions about AI model launches with animal codenames. One model needed a specific safety designation that uses the format ASL-X. What number X was being determined for the model named after a spotted wild cat?</question>\n    <answer>3</answer>\n  </qa_pair>\n<!-- More qa_pairs... -->\n</evaluation>\n```",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "### Output Format\n```xml\n<evaluation>\n   <qa_pair>\n      <question>Your question here</question>\n      <answer>Single verifiable answer</answer>\n   </qa_pair>\n</evaluation>\n```",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "Evaluation files use XML format with `<qa_pair>` elements:\n\n```xml\n<evaluation>\n   <qa_pair>\n      <question>Find the project created in Q2 2024 with the highest number of completed tasks. What is the project name?</question>\n      <answer>Website Redesign</answer>\n   </qa_pair>\n   <qa_pair>\n      <question>Search for issues labeled as \"bug\" that were closed in March 2024. Which user closed the most issues? Provide their username.</question>\n      <answer>sarah_dev</answer>\n   </qa_pair>\n</evaluation>\n```",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "Here's a complete example of creating and running an evaluation:\n\n1. **Create your evaluation file** (`my_evaluation.xml`):\n\n```xml\n<evaluation>\n   <qa_pair>\n      <question>Find the user who created the most issues in January 2024. What is their username?</question>\n      <answer>alice_developer</answer>\n   </qa_pair>\n   <qa_pair>\n      <question>Among all pull requests merged in Q1 2024, which repository had the highest number? Provide the repository name.</question>\n      <answer>backend-api</answer>\n   </qa_pair>\n   <qa_pair>\n      <question>Find the project that was completed in December 2023 and had the longest duration from start to finish. How many days did it take?</question>\n      <answer>127</answer>\n   </qa_pair>\n</evaluation>\n```",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    }
+  ],
+  "evidence": [
+    {
+      "text": "After creating evaluations:\n\n1. **Examine the XML file** to understand the schema\n2. **Load each task instruction** and in parallel using the MCP server and tools, identify the correct answer by attempting to solve the task YOURSELF\n3. **Flag any operations** that require WRITE or DESTRUCTIVE operations\n4. **Accumulate all CORRECT answers** and replace any incorrect answers in the document\n5. **Remove any `<qa_pair>`** that require WRITE or DESTRUCTIVE operations",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    }
+  ],
+  "examples": [
+    {
+      "text": "## Evaluation Examples\n\n### Good Questions\n\n**Example 1: Multi-hop question requiring deep exploration (GitHub MCP)**\n```xml\n<qa_pair>\n   <question>Find the repository that was archived in Q3 2023 and had previously been the most forked project in the organization. What was the primary programming language used in that repository?</question>\n   <answer>Python</answer>\n</qa_pair>\n```\n\nThis question is good because:\n- Requires multiple searches to find archived repositories\n- Needs to identify which had the most forks before archival\n- Requires examining repository details for the language\n- Answer is a simple, verifiable value\n- Based on historical (closed) data that won't change\n\n**Example 2: Requires understanding context without keyword matching (Project Management MCP)**\n```xml\n<qa_pair>\n   <question>Locate the initiative focused on improving customer onboarding that was completed in late 2023. The project lead created a retrospective document after completion. What was the lead's role title at that time?</question>\n   <answer>Product Manager</answer>\n</qa_pair>\n```\n\nThis question is good because:\n- Doesn't use specific project name (\"initiative focused on improving customer onboarding\")\n- Requires finding completed projects from specific timeframe\n- Needs to identify the project lead and their role\n- Requires understanding context from retrospective documents\n- Answer is human-readable and stable\n- Based on completed work (won't change)\n\n**Example 3: Complex aggregation requiring multiple steps (Issue Tracker MCP)**\n```xml\n<qa_pair>\n   <question>Among all bugs reported in January 2024 that were marked as critical priority, which assignee resolved the highest percentage of their assigned bugs within 48 hours? Provide the assignee's username.</question>\n   <answer>alex_eng</answer>\n</qa_pair>\n```\n\nThis question is good because:\n- Requires filtering bugs by date, priority, and status\n- Needs to group by assignee and calculate resolution rates\n- Requires understanding timestamps to determine 48-hour windows\n- Tests pagination (potentially many bugs to process)\n- Answer is a single username\n- Based on historical data from specific time period\n\n**Example 4: Requires synthesis across multiple data types (CRM MCP)**\n```xml\n<qa_pair>\n   <question>Find the account that upgraded from the Starter to Enterprise plan in Q4 2023 and had the highest annual contract value. What industry does this account operate in?</question>\n   <answer>Healthcare</answer>\n</qa_pair>\n```\n\nThis question is good because:\n- Requires understanding subscription tier changes\n- Needs to identify upgrade events in specific timeframe\n- Requires comparing contract values\n- Must access account industry information\n- Answer is simple and verifiable\n- Based on completed historical transactions\n\n### Poor Questions\n\n**Example 1: Answer changes over time**\n```xml\n<qa_pair>\n   <question>How many open issues are currently assigned to the engineering team?</question>\n   <answer>47</answer>\n</qa_pair>\n```\n\nThis question is poor because:\n- The answer will change as issues are created, closed, or reassigned\n- Not based on stable/stationary data\n- Relies on \"current state\" which is dynamic\n\n**Example 2: Too easy with keyword search**\n```xml\n<qa_pair>\n   <question>Find the pull request with title \"Add authentication feature\" and tell me who created it.</question>\n   <answer>developer123</answer>\n</qa_pair>\n```\n\nThis question is poor because:\n- Can be solved with a straightforward keyword search for exact title\n- Doesn't require deep exploration or understanding\n- No synthesis or analysis needed\n\n**Example 3: Ambiguous answer format**\n```xml\n<qa_pair>\n   <question>List all the repositories that have Python as their primary language.</question>\n   <answer>repo1, repo2, repo3, data-pipeline, ml-tools</answer>\n</qa_pair>\n```\n\nThis question is poor because:\n- Answer is a list that could be returned in any order\n- Difficult to verify with direct string comparison\n- LLM might format differently (JSON array, comma-separated, newline-separated)\n- Better to ask for a specific aggregate (count) or superlative (most stars)",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    }
+  ],
+  "notes": [
+    {
+      "text": "description: Guide for creating high-quality MCP (Model Context Protocol) servers that enable LLMs to interact with external services through well-designed tools.",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "MCP Server Evaluation Guide",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "## Purpose of Evaluations\n\nThe measure of quality of an MCP server is NOT how well or comprehensively the server implements tools, but how well these implementations (input/output schemas, docstrings/descriptions, functionality) enable LLMs with no other context and access ONLY to the MCP servers to answer realistic and difficult questions.",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "## Verification Process\n\nAfter creating evaluations:\n\n1. **Examine the XML file** to understand the schema\n2. **Load each task instruction** and in parallel using the MCP server and tools, identify the correct answer by attempting to solve the task YOURSELF\n3. **Flag any operations** that require WRITE or DESTRUCTIVE operations\n4. **Accumulate all CORRECT answers** and replace any incorrect answers in the document\n5. **Remove any `<qa_pair>`** that require WRITE or DESTRUCTIVE operations\n\nRemember to parallelize solving tasks to avoid running out of context, then accumulate all answers and make changes to the file at the end.",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "## Tips for Creating Quality Evaluations\n\n1. **Think Hard and Plan Ahead** before generating tasks\n2. **Parallelize Where Opportunity Arises** to speed up the process and manage context\n3. **Focus on Realistic Use Cases** that humans would actually want to accomplish\n4. **Create Challenging Questions** that test the limits of the MCP server's capabilities\n5. **Ensure Stability** by using historical data and closed concepts\n6. **Verify Answers** by solving the questions yourself using the MCP server tools\n7. **Iterate and Refine** based on what you learn during the process",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "## Running Evaluations\n\nAfter creating your evaluation file, you can use the provided evaluation harness to test your MCP server.\n\n## Setup\n\n1. **Install Dependencies**\n\n   ```bash\n   pip install -r scripts/requirements.txt\n   ```\n\n   Or install manually:\n   ```bash\n   pip install anthropic mcp\n   ```\n\n2. **Set API Key**\n\n   ```bash\n   export ANTHROPIC_API_KEY=your_api_key_here\n   ```",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "## Troubleshooting\n\n### Connection Errors\n\nIf you get connection errors:\n- **STDIO**: Verify the command and arguments are correct\n- **SSE/HTTP**: Check the URL is accessible and headers are correct\n- Ensure any required API keys are set in environment variables or headers\n\n### Low Accuracy\n\nIf many evaluations fail:\n- Review the agent's feedback for each task\n- Check if tool descriptions are clear and comprehensive\n- Verify input parameters are well-documented\n- Consider whether tools return too much or too little data\n- Ensure error messages are actionable\n\n### Timeout Issues\n\nIf tasks are timing out:\n- Use a more capable model (e.g., `claude-3-7-sonnet-20250219`)\n- Check if tools are returning too much data\n- Verify pagination is working correctly\n- Consider simplifying complex questions",
+      "source": "reference\\evaluation.md",
+      "multi": false
+    },
+    {
+      "text": "[Script summary — head comment only, no source code]\n\"\"\"MCP Server Evaluation Harness\n\nThis script evaluates MCP servers by running test questions against them using Claude.\n\"\"\"",
+      "source": "scripts/evaluation.py (summary)",
+      "multi": false
+    },
+    {
+      "text": "[LLM-generated summary — head content was empty]\nThis file specifies the dependencies required for the software package, listing the minimum versions of the \"anthropic\" and \"mcp\" libraries needed. It does not directly handle inputs or outputs but ensures that the necessary libraries are installed for the software to function correctly. The constraints include maintaining the specified or higher versions of these libraries to ensure compatibility and functionality.",
+      "source": "scripts/requirements.txt (summary)",
+      "multi": false
+    }
+  ]
+}
