@@ -15,13 +15,13 @@
     "role": "core_workflow",
     "read_priority": 1,
     "must_read_for_normalization": true,
-    "reasoning": "SKILL.md uses imperative language: 'TypeScript Implementation Guide - Complete TypeScript guide.'"
+    "reasoning": "SKILL.md uses imperative language: 'TypeScript Guide - Project structure, package.json, tsconfig.json.'"
   },
   "reference\\python_mcp_server.md": {
     "role": "core_workflow",
     "read_priority": 1,
     "must_read_for_normalization": true,
-    "reasoning": "SKILL.md uses imperative language: 'Python Implementation Guide - Complete Python/FastMCP guide.'"
+    "reasoning": "SKILL.md uses imperative language: 'Python Guide - Module organization, dependencies.'"
   },
   "scripts\\connections.py": {
     "role": "unreferenced",

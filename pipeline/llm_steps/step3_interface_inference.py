@@ -29,7 +29,6 @@ import logging
 
 from models.data_models import (
     AlternativeFlowSpec,
-    ClassifiedClause,
     EntitySpec,
     ExceptionFlowSpec,
     FlowStep,
@@ -123,7 +122,6 @@ def run_step3b_workflow_analysis(
 
 def run_step3_structured_extraction(
     bundle: SectionBundle,
-    classified_clauses: list[ClassifiedClause],  # unused; kept for orchestrator compat
     client: LLMClient,
 ) -> StructuredSpec:
     """
@@ -149,10 +147,9 @@ def run_step3_structured_extraction(
 # Backward-compatible alias
 def run_step3_interface_inference(
     bundle: SectionBundle,
-    classified_clauses: list[ClassifiedClause],
     client: LLMClient,
 ) -> StructuredSpec:
-    return run_step3_structured_extraction(bundle, classified_clauses, client)
+    return run_step3_structured_extraction(bundle, client)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

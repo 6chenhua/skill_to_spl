@@ -13,15 +13,13 @@ This module provides all the LLM-based processing steps for the skill-to-cnlp pi
 from pipeline.llm_steps.p2_file_role_resolve import run_p2_file_role_resolver
 from pipeline.llm_steps.p3_summarize_file import make_p3_summarize_fn
 from pipeline.llm_steps.step1_structure_extraction import run_step1_structure_extraction
-from pipeline.llm_steps.step2a_clause_extraction import run_step2a_clause_extraction
-from pipeline.llm_steps.step3_interface_inference import run_step3_interface_inference
+from pipeline.llm_steps.step3_interface_inference import run_step3_interface_inference, run_step3_structured_extraction
 from pipeline.llm_steps.step4_spl_emission import run_step4_spl_emission
 
 __all__ = [
     "run_p2_file_role_resolver",
     "make_p3_summarize_fn",
     "run_step1_structure_extraction",
-    "run_step2a_clause_extraction",
-    "run_step3_interface_inference",
+    "run_step3_structured_extraction",
     "run_step4_spl_emission",
 ]

@@ -25,8 +25,6 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 
 from models.data_models import (
-    ClassifiedClause,
-    Classification,
     EntitySpec,
     SectionBundle,
     SPLSpec,
@@ -44,59 +42,47 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_step4_spl_emission(
-        bundle: SectionBundle,
-        classified_clauses: list[ClassifiedClause],
-        interface_spec: StructuredSpec,
-        skill_id: str,
-        client: LLMClient,
+    bundle: SectionBundle,
+    interface_spec: StructuredSpec,
+    skill_id: str,
+    client: LLMClient,
 ) -> SPLSpec:
     """
     Step 4: Emit the final normalized SPL specification.
 
-    Round 1 — independent, run in parallel:
-      4a  PERSONA / AUDIENCE / CONCEPTS
-      4b  DEFINE_CONSTRAINTS   (all 4 tiers: HARD / MEDIUM / SOFT / GUIDELINE)
+    Round 1 — S4C + S4D in parallel (entities only, no workflow needed):
       4c  DEFINE_VARIABLES + DEFINE_FILES
-      4d  DEFINE_APIS          (NETWORK steps only — DEFINE_GUARDRAIL removed)
+      4d  DEFINE_APIS
 
-    After Round 1: extract symbol table from 4b, 4c, 4d.
+    After Round 1: extract symbol table (FILES, VARIABLES, APIS).
 
-    Round 2 — depends on symbol table:
-      4e  DEFINE_WORKER        (MAIN_FLOW + ALTERNATIVE_FLOW + EXCEPTION_FLOW)
+    Round 2 — S4A + S4B + S4E in parallel (all receive symbol table):
+      4a  PERSONA / AUDIENCE / CONCEPTS
+      4b  DEFINE_CONSTRAINTS
+      4e  DEFINE_WORKER   (MAIN_FLOW + ALTERNATIVE_FLOW + EXCEPTION_FLOW)
 
     Round 3 — depends on Round 2:
       4f  [EXAMPLES] block     (uses generated WORKER SPL + bundle.EXAMPLES)
     """
-    inputs = _prepare_step4_inputs(bundle, classified_clauses, interface_spec)
+    inputs = _prepare_step4_inputs(bundle, interface_spec)
 
-    # ── Round 1 ───────────────────────────────────────────────────────────────
-    logger.info("[Step 4] Round 1: launching 4 parallel block generators")
-
-    def call_4a() -> str:
-        return client.call(
-            "step4a_persona",
-            templates.S4A_SYSTEM,
-            templates.render_s4a_user(
-                inputs["intent_text"], inputs["notes_text"]
-            ),
-        )
-
-    def call_4b() -> str:
-        if not inputs["has_constraints"]:
-            return ""
-        return client.call(
-            "step4b_constraints",
-            templates.S4B_SYSTEM,
-            templates.render_s4b_user(inputs["constraints_text"]),
-        )
+    # ── Round 1: S4C + S4D — only need entities, no workflow yet ────────────
+    # Generate VARIABLES/FILES/APIS first so the symbol table is ready for
+    # S4A, S4B, and S4E — all may emit DESCRIPTION_WITH_REFERENCES that
+    # name declared variables, files, or APIs.
+    logger.info("[Step 4] Round 1: S4C (variables/files) + S4D (apis)")
 
     def call_4c() -> str:
         if not inputs["has_entities"]:
             return ""
+        combined = inputs["entities_text"]
+        if (inputs["omit_files_text"].strip()
+                and inputs["omit_files_text"] != "(No omit files found)"):
+            combined += "\n\n" + inputs["omit_files_text"]
         return client.call(
             "step4c_variables_files",
             templates.S4C_SYSTEM,
-            templates.render_s4c_user(inputs["has_entities"], inputs["omit_files_text"]),
+            templates.render_s4c_user(inputs["entities_text"], inputs["omit_files_text"]),
         )
 
     def call_4d() -> str:
@@ -110,26 +96,57 @@ def run_step4_spl_emission(
             ),
         )
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        block_4a = pool.submit(call_4a).result()
-        block_4b = pool.submit(call_4b).result()
+    with ThreadPoolExecutor(max_workers=2) as pool:
         block_4c = pool.submit(call_4c).result()
         block_4d = pool.submit(call_4d).result()
 
-    # ── Symbol table ──────────────────────────────────────────────────────────
-    symbol_table = _extract_symbol_table(block_4b, block_4c, block_4d)
-    logger.info("[Step 4] Symbol table: %d names extracted", len(symbol_table))
+    # ── Symbol table (FILES, VARIABLES, APIS only) ────────────────────────────
+    symbol_table      = _extract_symbol_table(block_4c)
+    symbol_table_text = _format_symbol_table(symbol_table)
+    logger.info("[Step 4] Symbol table — variables: %d, files: %d",
+                 len(symbol_table["variables"]), len(symbol_table["files"]))
 
-    # ── Round 2 ───────────────────────────────────────────────────────────────
-    logger.info("[Step 4] Round 2: generating WORKER")
-    s4e_system, s4e_user = templates.render_s4e_user(
-        workflow_steps_json=inputs["workflow_steps_json"],
-        workflow_prose=inputs["workflow_prose"],
-        alternative_flows_json=inputs["alternative_flows_json"],
-        exception_flows_json=inputs["exception_flows_json"],
-        symbol_table=_format_symbol_table(symbol_table),
-    )
-    block_4e = client.call(step_name="step4e_worker", system=s4e_system, user=s4e_user)
+    # ── Round 2: S4A + S4B + S4E — all receive the symbol table ──────────────
+    logger.info("[Step 4] Round 2: S4A (persona) + S4B (constraints) + S4E (worker)")
+
+    def call_4a() -> str:
+        return client.call(
+            "step4a_persona",
+            templates.S4A_SYSTEM,
+            templates.render_s4a_user(
+                intent_text=inputs["intent_text"],
+                notes_text=inputs["notes_text"],
+                symbol_table=symbol_table_text,
+            ),
+        )
+
+    def call_4b() -> str:
+        if not inputs["has_constraints"]:
+            return ""
+        return client.call(
+            "step4b_constraints",
+            templates.S4B_SYSTEM,
+            templates.render_s4b_user(
+                constraints_text=inputs["constraints_text"],
+                symbol_table=symbol_table_text,
+            ),
+        )
+
+    def call_4e() -> str:
+        s4e_system, s4e_user = templates.render_s4e_user(
+            workflow_steps_json=inputs["workflow_steps_json"],
+            workflow_prose=inputs["workflow_prose"],
+            alternative_flows_json=inputs["alternative_flows_json"],
+            exception_flows_json=inputs["exception_flows_json"],
+            symbol_table=symbol_table_text,
+            apis_spl=block_4d,
+        )
+        return client.call(step_name="step4e_worker", system=s4e_system, user=s4e_user)
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        block_4a = pool.submit(call_4a).result()
+        block_4b = pool.submit(call_4b).result()
+        block_4e = pool.submit(call_4e).result()
 
     # ── Round 3 ───────────────────────────────────────────────────────────────
     logger.info("[Step 4] Round 3: generating EXAMPLES")
@@ -148,8 +165,8 @@ def run_step4_spl_emission(
     spl_text = _assemble_spl(
         skill_id, block_4a, block_4b, block_4c, block_4d, block_4e, block_4f
     )
-    review_summary = _build_review_summary(classified_clauses, interface_spec)
-    clause_counts = _count_clauses(classified_clauses)
+    review_summary = _build_review_summary()
+    clause_counts  = {}
 
     logger.info("[Step 4] SPL assembled (%d chars)", len(spl_text))
     return SPLSpec(
@@ -162,57 +179,12 @@ def run_step4_spl_emission(
 
 # ── Input preparation ─────────────────────────────────────────────────────────
 
-def _format_constraints_for_s4b(clauses: list[ClassifiedClause]) -> str:
-    """
-    Format ALL rule-type clauses for S4B: HARD, MEDIUM, SOFT, and NON/GUIDELINE.
-    S4B_SYSTEM maps each tier to the correct SPL syntax.
-    """
-    if not clauses:
-        return "(No constraints found)"
-
-    by_tier = {
-        "HARD": [c for c in clauses if c.classification == Classification.HARD],
-        "MEDIUM": [c for c in clauses if c.classification == Classification.MEDIUM],
-        "SOFT": [c for c in clauses if c.classification == Classification.SOFT],
-        "NON": [c for c in clauses if c.classification == Classification.NON],
-    }
-
-    tier_labels = {
-        "HARD": "HARD constraints (emit as hard gates with LOG):",
-        "MEDIUM": "MEDIUM constraints (emit as [MEDIUM] with LOG):",
-        "SOFT": "SOFT constraints (emit as [SOFT], no LOG):",
-        "NON": "GUIDELINE constraints (emit as [GUIDELINE], no LOG):",
-    }
-
-    lines = []
-    for tier, label in tier_labels.items():
-        tier_clauses = by_tier[tier]
-        if not tier_clauses:
-            continue
-        lines.append(label)
-        lines.append("")
-        for c in tier_clauses:
-            lines.append(f"Constraint ID: {c.clause_id}")
-            lines.append(f"Requirement:   {c.original_text}")
-            lines.append(f"Source:        {c.source_file}")
-            lines.append(f"Confidence:    {c.confidence:.2f}")
-            if c.needs_review:
-                lines.append("Needs Review:  Yes")
-            if c.risk_override:
-                lines.append("Risk Override: Upgraded from SOFT due to R=3")
-            if getattr(c, "downgraded", False):
-                lines.append("Capability Downgrade: Originally HARD")
-            lines.append("")
-
-    return "\n".join(lines)
-
-
 def _format_entities_for_s4c(entities: list[EntitySpec]) -> str:
     if not entities:
         return "(No entities found)"
 
     variables = [e for e in entities if e.kind != "Artifact"]
-    files = [e for e in entities if e.kind == "Artifact"]
+    files     = [e for e in entities if e.kind == "Artifact"]
     lines = []
 
     if variables:
@@ -263,16 +235,15 @@ def _format_omit_files_for_s4c(omit_files: list[EntitySpec]) -> str:
 
 
 def _prepare_step4_inputs(
-        bundle: SectionBundle,
-        classified_clauses: list[ClassifiedClause],
-        structured_spec: StructuredSpec,
+    bundle: SectionBundle,
+    structured_spec: StructuredSpec,
 ) -> dict:
     """
-    Pre-compute all inputs for the five Step 4 calls.
+    Pre-compute all inputs for the Step 4 calls.
 
     Routing:
       S4A  ← bundle[INTENT + NOTES]
-      S4B  ← ALL rule-type clauses (HARD + MEDIUM + SOFT + NON)
+      S4B  ← bundle[CONSTRAINTS]  (verbatim section text)
       S4C  ← structured_spec.entities + omit_files
       S4D  ← NETWORK steps (API declaration only)
       S4E  ← ALL workflow steps (MAIN_FLOW)
@@ -282,19 +253,15 @@ def _prepare_step4_inputs(
     """
     # S4A
     intent_text = bundle.to_text(["INTENT"])
-    notes_text = bundle.to_text(["NOTES"])
+    notes_text  = bundle.to_text(["NOTES"])
 
-    # S4B — ALL rule-type clauses across all classification tiers
-    rule_clauses = [
-        c for c in classified_clauses
-        if getattr(c, "clause_type", "") == "rule"
-    ]
-    constraints_text = _format_constraints_for_s4b(rule_clauses)
+    # S4B — CONSTRAINTS section text (verbatim from bundle)
+    constraints_text = bundle.to_text(["CONSTRAINTS"])
 
     # S4C — entities + omit-files
-    entities_text = _format_entities_for_s4c(structured_spec.entities)
-    omit_files = [e for e in structured_spec.entities
-                  if getattr(e, "from_omit_files", False)]
+    entities_text  = _format_entities_for_s4c(structured_spec.entities)
+    omit_files     = [e for e in structured_spec.entities
+                      if getattr(e, "from_omit_files", False)]
     omit_files_text = _format_omit_files_for_s4c(omit_files)
 
     # S4D — NETWORK steps for API declaration
@@ -330,97 +297,91 @@ def _prepare_step4_inputs(
     examples_text = bundle.to_text(["EXAMPLES"])
 
     return {
-        "intent_text": intent_text,
-        "notes_text": notes_text,
-        "constraints_text": constraints_text,
-        "entities_text": entities_text,
-        "omit_files_text": omit_files_text,
-        "network_steps_json": network_steps_json,
-        "workflow_steps_json": workflow_steps_json,
-        "workflow_prose": workflow_prose,
-        "alternative_flows_json": alternative_flows_json,
-        "exception_flows_json": exception_flows_json,
-        "examples_text": examples_text,
+        "intent_text":                   intent_text,
+        "notes_text":                    notes_text,
+        "constraints_text":              constraints_text,
+        "entities_text":                 entities_text,
+        "omit_files_text":               omit_files_text,
+        "network_steps_json":            network_steps_json,
+        "workflow_steps_json":           workflow_steps_json,
+        "workflow_prose":                workflow_prose,
+        "alternative_flows_json":        alternative_flows_json,
+        "exception_flows_json":          exception_flows_json,
+        "examples_text":                 examples_text,
         # control flags
-        "has_constraints": bool(rule_clauses),
-        "has_entities": bool(structured_spec.entities),
+        "has_constraints":   bool(constraints_text.strip()),
+        "has_entities":      bool(structured_spec.entities),
         "has_network_steps": bool(network_steps),
-        "has_examples": bool(examples_text.strip()),
+        "has_examples":      bool(examples_text.strip()),
     }
 
 
 def _step_to_dict(s: WorkflowStepSpec) -> dict:
     return {
-        "step_id": s.step_id,
-        "description": s.description,
-        "prerequisites": s.prerequisites,
-        "produces": s.produces,
+        "step_id":            s.step_id,
+        "description":        s.description,
+        "prerequisites":      s.prerequisites,
+        "produces":           s.produces,
         "is_validation_gate": s.is_validation_gate,
-        "effects": s.effects,
-        "tool_hint": s.tool_hint,
-        "source_text": s.source_text,
-        "execution_mode": getattr(s, "execution_mode", "LLM_PROMPT"),
+        "effects":            s.effects,
+        "tool_hint":          s.tool_hint,
+        "source_text":        s.source_text,
+        "execution_mode":     getattr(s, "execution_mode", "LLM_PROMPT"),
     }
 
 
 # ── Symbol table ──────────────────────────────────────────────────────────────
 
-_CONSTRAINT_NAME_RE = re.compile(r"^\s{1,12}(?:\[MEDIUM\]\s+|\[SOFT\]\s+|\[GUIDELINE\]\s+)?([A-Z][A-Za-z0-9]+):\s",
-                                 re.MULTILINE)
 _VARIABLE_NAME_RE = re.compile(r'^\s{1,12}"[^"]+"\s+(?:READONLY\s+)?([a-z][a-z0-9_]+):', re.MULTILINE)
-_FILE_NAME_RE = re.compile(r'^\s{1,12}"[^"]+"\s+([a-z][a-z0-9_]+)\s+<', re.MULTILINE)
-_API_NAME_RE = re.compile(r'"[^"]+"\s+([A-Z][A-Za-z0-9]+)\s+<(?:none|apikey|oauth)>')
+_FILE_NAME_RE     = re.compile(r'^\s{1,12}"[^"]+"\s+([a-z][a-z0-9_]+)\s+<', re.MULTILINE)
 
 
-def _extract_symbol_table(
-        block_4b: str,
-        block_4c: str,
-        block_4d: str,
-) -> dict[str, list[str]]:
+def _extract_symbol_table(block_4c: str) -> dict[str, list[str]]:
+    """
+    Extract FILES and VARIABLES declared in the DEFINE_VARIABLES/DEFINE_FILES
+    block (4c).  APIS are NOT included — they are passed separately to S4E.
+    """
     table: dict[str, list[str]] = {
-        "constraint_aspects": [],
         "variables": [],
-        "files": [],
-        "apis": [],
+        "files":     [],
     }
-    if block_4b:
-        table["constraint_aspects"] = _CONSTRAINT_NAME_RE.findall(block_4b)
     if block_4c:
-        parts = block_4c.split("[END_VARIABLES]")
-        var_block = parts[0] if len(parts) > 1 else block_4c
+        parts      = block_4c.split("[END_VARIABLES]")
+        var_block  = parts[0] if len(parts) > 1 else block_4c
         file_block = parts[1] if len(parts) > 1 else ""
         table["variables"] = _VARIABLE_NAME_RE.findall(var_block)
-        table["files"] = _FILE_NAME_RE.findall(file_block)
-    if block_4d:
-        table["apis"] = _API_NAME_RE.findall(block_4d)
+        table["files"]     = _FILE_NAME_RE.findall(file_block)
     return table
 
 
 def _format_symbol_table(symbol_table: dict[str, list[str]]) -> str:
+    """
+    Render FILES + VARIABLES as a reference block for S4A, S4B, and S4E.
+    These are the names that may appear in DESCRIPTION_WITH_REFERENCES across
+    all three blocks.  APIS are injected separately into S4E.
+    """
     mapping = {
-        "constraint_aspects": "CONSTRAINTS  (use as condition in [EXCEPTION_FLOW: AspectName_violated])",
-        "variables": "VARIABLES    (use in <REF> var_name </REF>)",
-        "files": "FILES        (use in <REF> file_name </REF>)",
-        "apis": "APIS         (use in [CALL ApiName ...])",
+        "variables": "VARIABLES (reference as <REF> var_name </REF>)",
+        "files":     "FILES     (reference as <REF> file_name </REF>)",
     }
     lines = []
     for key, label in mapping.items():
         names = symbol_table.get(key, [])
         if names:
             lines.append(f"{label}:\n  {', '.join(names)}")
-    return "\n\n".join(lines) if lines else "(no symbols defined in earlier blocks)"
+    return "\n\n".join(lines) if lines else "(no variables or files declared)"
 
 
 # ── Assembly ──────────────────────────────────────────────────────────────────
 
 def _assemble_spl(
-        skill_id: str,
-        block_4a: str,
-        block_4b: str,
-        block_4c: str,
-        block_4d: str,
-        block_4e: str,
-        block_4f: str,
+    skill_id: str,
+    block_4a: str,
+    block_4b: str,
+    block_4c: str,
+    block_4d: str,
+    block_4e: str,
+    block_4f: str,
 ) -> str:
     """
     Concatenate all blocks in canonical SPL order.
@@ -468,56 +429,10 @@ def _strip_fences(text: str) -> str:
 
 # ── Review summary ────────────────────────────────────────────────────────────
 
-def _build_review_summary(
-        classified_clauses: list[ClassifiedClause],
-        structured_spec: StructuredSpec,
-) -> str:
-    counts = _count_clauses(classified_clauses)
-    lines = [
-        "## Review Summary\n",
-        "Clauses emitted: "
-        + "  ".join(f"{k.split('_')[-1]}={v}" for k, v in counts.items()),
-        "",
-    ]
-
-    needs_review = [c for c in classified_clauses if c.needs_review]
-    if needs_review:
-        lines.append("### Items requiring human review (NEEDS_REVIEW: true)")
-        for c in needs_review:
-            lines.append(
-                f"- [{c.clause_id}] {c.classification.value}: "
-                f"{c.original_text[:100]}"
-            )
-        lines.append("")
-
-    low_conf = [c for c in classified_clauses if c.confidence < 0.6]
-    if low_conf:
-        lines.append("### Low-confidence clauses (confidence < 0.6)")
-        for c in low_conf:
-            lines.append(
-                f"- [{c.clause_id}] confidence={c.confidence:.2f}: "
-                f"{c.original_text[:100]}"
-            )
-        lines.append("")
-
-    downgraded = [c for c in classified_clauses if getattr(c, "downgraded", False)]
-    if downgraded:
-        lines.append("### Downgraded clauses (HARD → MEDIUM by capability profile)")
-        for c in downgraded:
-            lines.append(
-                f"- [{c.clause_id}] {c.classification.value}: "
-                f"{c.original_text[:100]}"
-            )
-        lines.append("")
-
-    return "\n".join(lines)
+def _build_review_summary() -> str:
+    return "## Review Summary\n"
 
 
-def _count_clauses(classified_clauses: list[ClassifiedClause]) -> dict[str, int]:
-    counts = {c.value: 0 for c in Classification}
-    for clause in classified_clauses:
-        counts[clause.classification.value] += 1
-    return counts
 
 
 # Legacy helper — kept for compatibility

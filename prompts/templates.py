@@ -19,11 +19,10 @@ render_* helpers at the bottom of this module.
 from __future__ import annotations
 from prompts.p2_system import v1 as p2_sys
 from prompts.step1_system import v2 as s1_sys
-from prompts.step2a_system import v1 as s2a_sys
 from prompts.step3_system import s3_a_v1 as s3_a, s3_b_v3 as s3_b
 from prompts.step4_system import (
     s4_a_v2 as s4_a,
-    s4_b_v2 as s4_b,
+    s4_b_v3 as s4_b,
     s4_c_v1 as s4_c,
     s4_d_v2 as s4_d,
     s4_e_v4 as s4_e,
@@ -64,18 +63,6 @@ STEP1_USER = """\
 ## Document package
 
 {{merged_doc_text}}
-"""
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Step 2A — Normative Clause Extraction + Scoring
-# ─────────────────────────────────────────────────────────────────────────────
-
-STEP2A_SYSTEM = s2a_sys
-
-STEP2A_USER = """\
-## Document content
-
-{{section_bundle_text}}
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -187,9 +174,16 @@ Scan for explicit term definitions to populate CONCEPTS.
 S4B_SYSTEM = s4_b
 
 S4B_USER = """\
-Classified requirements (all tiers — HARD, MEDIUM, SOFT, GUIDELINE):
+## Normative requirements from the CONSTRAINTS section
 
 {{constraints_text}}
+
+## Declared symbols (from DEFINE_VARIABLES, DEFINE_FILES, DEFINE_APIS)
+When constraint description text refers to a declared variable, file, or
+API by name, you may emit a <REF> reference.
+Only reference names that appear in this list.
+
+{{symbol_table}}
 """
 
 # ── 4c: VARIABLES + FILES ─────────────────────────────────────────────────────
@@ -297,10 +291,6 @@ def render_step1_user(merged_doc_text: str) -> str:
     return STEP1_USER.replace("{{merged_doc_text}}", merged_doc_text)
 
 
-def render_step2a_user(section_bundle_text: str) -> str:
-    return STEP2A_USER.replace("{{section_bundle_text}}", section_bundle_text)
-
-
 def render_step3a_user(
         artifacts_section: str,
         workflow_section: str,
@@ -329,14 +319,21 @@ def render_step3b_user(
     )
 
 
-def render_s4a_user(intent_text: str, notes_text: str) -> str:
-    return (S4A_USER
-            .replace("{{intent_text}}", intent_text)
-            .replace("{{notes_text}}", notes_text))
+def render_s4a_user(intent_text: str, notes_text: str,  symbol_table: str = "") -> str:
+    return (
+        S4A_USER
+        .replace("{{intent_text}}", intent_text)
+        .replace("{{notes_text}}", notes_text)
+        .replace("{{symbol_table}}", symbol_table or "(none)")
+    )
 
 
-def render_s4b_user(constraints_text: str) -> str:
-    return S4B_USER.replace("{{constraints_text}}", constraints_text)
+def render_s4b_user(constraints_text: str, symbol_table: str = "") -> str:
+    return (
+        S4B_USER
+        .replace("{{constraints_text}}", constraints_text)
+        .replace("{{symbol_table}}", symbol_table or "(none)")
+    )
 
 
 def render_s4c_user(entities_text: str, omit_files_text: str) -> str:
@@ -355,12 +352,14 @@ def render_s4e_user(
     alternative_flows_json: str,
     exception_flows_json: str,
     symbol_table: str,
+    apis_spl: str = "",
 ) -> tuple[str, str]:
     system = S4E_SYSTEM.replace("{{symbol_table}}", symbol_table)
     user = (
         S4E_USER
         .replace("{{workflow_steps_json}}", workflow_steps_json)
         .replace("{{workflow_prose}}", workflow_prose)
+        .replace("{{apis_spl}}", apis_spl or "(no APIs declared)")
         .replace("{{alternative_flows_json}}", alternative_flows_json)
         .replace("{{exception_flows_json}}", exception_flows_json)
     )

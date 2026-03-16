@@ -1,308 +1,162 @@
-a_v1 = """\
-You write the opening identity blocks of an SPL specification.
-SPL (Structured Prompt Language) is a normalized, machine-readable format for
-describing agent behaviors.  You will emit exactly the blocks listed below and
-nothing else.
-
-BLOCK 1 — PERSONA (always emit)
-Describes who the agent is.
-
-  [DEFINE_PERSONA:]
-      ROLE: <one sentence — the agent's core purpose>
-      DOMAIN: <technical domain, only if stated in source>
-      EXPERTISE: <required expertise level, only if stated in source>
-  [END_PERSONA]
-
-BLOCK 2 — AUDIENCE (emit only if the source explicitly names a user group)
-Describes who uses this agent.
-
-  [DEFINE_AUDIENCE:]
-      KNOWLEDGE: <what background the user is assumed to have>
-      INTEREST: <what the user wants to accomplish>
-  [END_AUDIENCE]
-
-BLOCK 3 — CONCEPTS (emit only if the source explicitly defines domain terms)
-One line per term.
-
-  [DEFINE_CONCEPTS:]
-      TermName: <definition verbatim from source>
-  [END_CONCEPTS]
-
-Rules:
-- Copy wording from the source text. Do not invent descriptions.
-- Omit AUDIENCE entirely if no user group is mentioned.
-- Omit CONCEPTS entirely if no terms are explicitly defined.
-- Use 4-space indentation.
-- Output only the SPL blocks, no prose, no markdown fences.
-"""
-
 s4_a_v2 = """\
 Emit the opening identity blocks of an SPL specification.
 Emit exactly the blocks listed below and nothing else.
  
-## Grammar
+## Complete grammar
  
-  [DEFINE_PERSONA:]
-      ROLE: <one sentence — the agent's core purpose>
-      DOMAIN: <technical domain, only if stated in source>
-      EXPERTISE: <required expertise level, only if stated in source>
-  [END_PERSONA]
+SPL_PROMPT := PERSONA [AUDIENCE] [CONCEPTS] ...
  
-  [DEFINE_AUDIENCE:]          ← emit ONLY if the source explicitly names a user group
-      KNOWLEDGE: <what background the user is assumed to have>
-      INTEREST: <what the user wants to accomplish>
-  [END_AUDIENCE]
+PERSONA := "[DEFINE_PERSONA:]" PERSONA_ASPECTS "[END_PERSONA]"
+PERSONA_ASPECTS := ROLE_ASPECT {OPTIONAL_ASPECT}
+ROLE_ASPECT := "ROLE" ":" DESCRIPTION_WITH_REFERENCES
  
-  [DEFINE_CONCEPTS:]          ← emit ONLY if the source explicitly defines domain terms
-      TermName: <definition verbatim from source>
-  [END_CONCEPTS]
+AUDIENCE := "[DEFINE_AUDIENCE:]" AUDIENCE_ASPECTS "[END_AUDIENCE]"
+AUDIENCE_ASPECTS := {OPTIONAL_ASPECT}
  
-OPTIONAL_ASPECT_NAME rules: capitalize each word; use any word that
-matches the aspect being described (ROLE, DOMAIN, EXPERTISE, KNOWLEDGE,
-INTEREST, or any domain-specific term from the source).
+CONCEPTS := "[DEFINE_CONCEPTS:]" {CONCEPT} "[END_CONCEPTS]"
+CONCEPT := OPTIONAL_ASPECT_NAME ":" STATIC_DESCRIPTION
  
-## How to use the input
+OPTIONAL_ASPECT := OPTIONAL_ASPECT_NAME ":" DESCRIPTION_WITH_REFERENCES
+OPTIONAL_ASPECT_NAME := <word>   # e.g. DOMAIN, EXPERTISE, KNOWLEDGE — capitalize
  
-INTENT section items → source for PERSONA and AUDIENCE:
-  - The sentence that best captures "what this agent does" → ROLE aspect.
-  - Any sentence naming a technical field → DOMAIN aspect (emit when present).
-  - Any sentence naming an expertise level (e.g. "expert", "junior dev") →
-    EXPERTISE aspect (emit when present).
-  - Any sentence explicitly naming who uses this agent → emit AUDIENCE block
-    with KNOWLEDGE and INTEREST derived from that sentence.
-    Emit AUDIENCE only when a user group is explicitly named.
+DESCRIPTION_WITH_REFERENCES := STATIC_DESCRIPTION {DESCRIPTION_WITH_REFERENCES}
+                              | REFERENCE {DESCRIPTION_WITH_REFERENCES}
+STATIC_DESCRIPTION := <word> | <word> <space> STATIC_DESCRIPTION
+REFERENCE := "<REF>" ["*"] NAME "</REF>"
+NAME := SIMPLE_NAME | QUALIFIED_NAME | ARRAY_ACCESS | DICT_ACCESS
+SIMPLE_NAME    := <word>
+QUALIFIED_NAME := NAME "." SIMPLE_NAME
+ARRAY_ACCESS   := NAME "[" [<number>] "]"
+DICT_ACCESS    := NAME "[" SIMPLE_NAME "]"
+<word> is a sequence of characters, digits and symbols without space
+<space> is white space or tab
  
-NOTES section items → source for CONCEPTS:
-  - Look for sentences that define technical terms in "term: definition" or
-    "X means Y" pattern → emit one CONCEPT entry per defined term.
-    Emit CONCEPTS only when terms are explicitly defined.
-  - Background rationale, caveats, and version information → skip.
+## How to use the inputs
+ 
+INTENT section → PERSONA and AUDIENCE:
+  - Best sentence capturing "what this agent does" → ROLE aspect.
+  - Sentence naming a technical field → DOMAIN optional aspect.
+  - Sentence naming an expertise level → EXPERTISE optional aspect.
+  - Sentence explicitly naming who uses this agent → emit AUDIENCE block.
+    Omit AUDIENCE if no user group is explicitly named.
+ 
+NOTES section → CONCEPTS:
+  - Sentences defining terms ("X means Y") → one CONCEPT per defined term.
+  - Background rationale and caveats → skip.
+ 
+Declared symbols section → use <REF> only when ROLE/DOMAIN/EXPERTISE text
+explicitly names a declared variable or file by that exact name.
  
 ## Rules
-- Copy wording from source text.
+- Copy wording verbatim from source text. Do not paraphrase.
+- Omit AUDIENCE if no user group is named.
+- Omit CONCEPTS if no terms are explicitly defined.
 - Use 4-space indentation.
 - Output ONLY the SPL blocks. No prose, no markdown fences, no explanation.
 """
 
-
-b_v1 = """\
-You write the [DEFINE_CONSTRAINTS:] block of an SPL specification.
-
-## Why this input maps to CONSTRAINTS
-Each entry is a normative requirement that has been classified as either:
-  COMPILABLE_HARD — the requirement is deterministically checkable and
-    actionable. It becomes a hard gate in SPL: the agent must stop if the
-    condition is violated.  This is the only tier that uses LOG_VIOLATION.
-  COMPILABLE_SOFT — the requirement expresses guidance or best practice that
-    cannot be mechanically verified. It appears in SPL as a named constraint
-    with a [SOFT:] prefix but NO log line — it documents intent, not a gate.
-  (MEDIUM and NON_COMPILABLE entries do NOT appear here — they go into
-   ALTERNATIVE_FLOW and EXCEPTION_FLOW respectively inside the WORKER.)
-
-## SYNTAX
-
-  [DEFINE_CONSTRAINTS:]
-      AspectName: <requirement text> LOG <source_file>:<clause_id>
-      # SOURCE_REF: <source_file>:<clause_id>
-      # CONFIDENCE: <float 0.0-1.0>
-      # NEEDS_REVIEW: true | false
-  [END_CONSTRAINTS]
-
-  HARD entry:  AspectName: <verbatim requirement text> LOG <source_file>:<clause_id>
-  SOFT entry:  AspectName: [SOFT: <verbatim requirement text>]
-               (no LOG line for SOFT)
-
-  AspectName rules:
-  - Derive from the requirement topic in CamelCase (e.g., DetectBeforeFill)
-  - Must be a stable identifier — no spaces, no punctuation other than capital letters
-  - This name will be referenced downstream as AspectName_violation in [THROW] commands
-
-  Additional annotation when risk_override == true:
-  # RISK_OVERRIDE: R=3 — upgraded from SOFT
-
-## RULES
-- One entry per clause_id. Copy original_text verbatim into the requirement text.
-- If zero HARD or SOFT clauses exist, emit:
+s4_b_v3 = """\
+Emit the [DEFINE_CONSTRAINTS:] block of an SPL specification.
+ 
+## Complete grammar
+ 
+CONSTRAINTS := "[DEFINE_CONSTRAINTS:]" {CONSTRAINT} "[END_CONSTRAINTS]"
+CONSTRAINT   := [OPTIONAL_ASPECT_NAME ":"] DESCRIPTION_WITH_REFERENCES
+ 
+OPTIONAL_ASPECT_NAME := <word>
+  - Capitalize; derive from requirement topic in CamelCase (e.g. ToolNaming, ApiKeyStorage).
+  - One aspect may have multiple CONSTRAINT lines under the same name.
+  - Omit only when the requirement has no stable, referenceable identity.
+ 
+DESCRIPTION_WITH_REFERENCES := STATIC_DESCRIPTION {DESCRIPTION_WITH_REFERENCES}
+                              | REFERENCE {DESCRIPTION_WITH_REFERENCES}
+STATIC_DESCRIPTION := <word> | <word> <space> STATIC_DESCRIPTION
+REFERENCE := "<REF>" ["*"] NAME "</REF>"
+NAME := SIMPLE_NAME | QUALIFIED_NAME | ARRAY_ACCESS | DICT_ACCESS
+SIMPLE_NAME    := <word>
+QUALIFIED_NAME := NAME "." SIMPLE_NAME
+ARRAY_ACCESS   := NAME "[" [<number>] "]"
+DICT_ACCESS    := NAME "[" SIMPLE_NAME "]"
+<word> is a sequence of characters, digits and symbols without space
+<space> is white space or tab
+ 
+Notes:
+- Constraints do not have explicit INPUTS; arguments are inferred from context.
+- Use <REF> var_name </REF> only when a constraint naturally references a
+  declared variable or file from the symbol table.
+ 
+## Rules
+- Copy requirement text VERBATIM. Do not paraphrase.
+- One CONSTRAINT entry per distinct normative requirement.
+- Append source filename in parentheses: AspectName: text (source.md)
+- If no requirements exist:
     [DEFINE_CONSTRAINTS:]
     [END_CONSTRAINTS]
 - Use 4-space indentation.
-- Output ONLY the SPL block. No prose, no markdown fences, no explanation.
-"""
-
-s4_b_v2 = """\
-You write the [DEFINE_CONSTRAINTS:] block of an SPL specification.
- 
-Each entry is a normative rule classified into one of four enforcement tiers:
- 
-  HARD     — deterministically checkable and directly actionable.
-             The agent must stop if violated. Requires a LOG line.
-  MEDIUM   — conditionally checkable; the main flow may not always satisfy it.
-             Requires a LOG line. An ALTERNATIVE_FLOW may handle the backup path.
-  SOFT     — guidance or best practice; cannot be mechanically verified.
-             No LOG line. Prefix with [SOFT].
-  GUIDELINE — advisory only; lowest normative force.
-             No LOG line. Prefix with [GUIDELINE].
- 
-## SYNTAX
- 
-  [DEFINE_CONSTRAINTS:]
-      AspectName: <requirement text> LOG <source_file>:<clause_id>
-      # SOURCE_REF: <source_file>:<clause_id>
-      # CONFIDENCE: <float 0.0-1.0>
-      # NEEDS_REVIEW: true | false
-  [END_CONSTRAINTS]
- 
-Tier syntax summary:
-  HARD     AspectName: <text> LOG <source>:<id>
-  MEDIUM   [MEDIUM] AspectName: <text> LOG <source>:<id>
-  SOFT     [SOFT] AspectName: <text>
-  GUIDELINE [GUIDELINE] AspectName: <text>
- 
-AspectName rules:
-  - CamelCase, derived from the requirement topic (e.g., ToolNamingSnakeCase)
-  - No spaces, no punctuation other than capital letters
-  - This name is referenced in EXCEPTION_FLOW condition labels as AspectName_violated
- 
-Additional annotation when risk_override == true (SOFT promoted to MEDIUM):
-  # RISK_OVERRIDE: R=3 — upgraded from SOFT
- 
-Additional annotation when downgraded == true (HARD reduced by capability profile):
-  # CAPABILITY_DOWNGRADE: originally HARD
- 
-## RULES
-- One entry per clause_id. Copy original_text verbatim into the requirement text.
-- Order: HARD first, then MEDIUM, then SOFT, then GUIDELINE.
-- If zero clauses exist, emit:
-    [DEFINE_CONSTRAINTS:]
-    [END_CONSTRAINTS]
-- Use 4-space indentation.
-- Output ONLY the SPL block. No prose, no markdown fences, no explanation.
-"""
-
+- Output ONLY the [DEFINE_CONSTRAINTS:] ... [END_CONSTRAINTS] block.
+  No prose, no markdown fences, no explanation."""
 
 s4_c_v1 = """\
 Emit the [DEFINE_VARIABLES:] and [DEFINE_FILES:] blocks of an SPL specification.
  
-## Grammar
+## Complete grammar
  
-  VARIABLES := "[DEFINE_VARIABLES:]" {VARIABLE_DECLARATION} "[END_VARIABLES]"
-  VARIABLE_DECLARATION :=
-      ["\"" DESCRIPTION "\""] ["READONLY"] VAR_NAME ":" DATA_TYPE ["=" DEFAULT_VALUE]
+VARIABLES := "[DEFINE_VARIABLES:]" {VARIABLE_DECLARATION} "[END_VARIABLES]"
+VARIABLE_DECLARATION :=
+    ["\"" DESCRIPTION_WITH_REFERENCES "\""]
+    ["READONLY"]
+    VAR_NAME ":" DATA_TYPE ["=" DEFAULT_VALUE]
+VAR_NAME := <word>
  
-  FILES := "[DEFINE_FILES:]" {FILE_DECLARATION} "[END_FILES]"
-  LEAF_FILE_DECLARATION :=
-      ["\"" DESCRIPTION "\""] ["LOG" <file-exceptions>] FILE_NAME FILE_PATH ":" DATA_TYPE
-  FOLDER_DECLARATION :=
-      ["\"" DESCRIPTION "\""] FILE_NAME FILE_PATH "List [" {FILE_DECLARATION} "]"
+FILES := "[DEFINE_FILES:]" {FILE_DECLARATION} "[END_FILES]"
+FILE_DECLARATION := FOLDER_DECLARATION | LEAF_FILE_DECLARATION
+FOLDER_DECLARATION :=
+    ["\"" STATIC_DESCRIPTION "\""]
+    FILE_NAME FILE_PATH
+    "List [" {FOLDER_DECLARATION | LEAF_FILE_DECLARATION} "]"
+LEAF_FILE_DECLARATION :=
+    ["\"" STATIC_DESCRIPTION "\""]
+    ["LOG" <file-exceptions>]
+    FILE_NAME FILE_PATH ":" DATA_TYPE
+FILE_NAME := <word>
+FILE_PATH := <filepath> | "< >"    # < > = not known at compile time; upload at runtime
  
-  FILE_PATH := <filepath> | "< >"
-      < > means the file is not known at compile time — it must be uploaded at runtime.
+DATA_TYPE := ARRAY_DATA_TYPE | STRUCTURED_DATA_TYPE | ENUM_TYPE | TYPE_NAME
+TYPE_NAME  := "text" | "image" | "audio" | "number" | "boolean"
+ARRAY_DATA_TYPE      := "List [" DATA_TYPE "]"
+STRUCTURED_DATA_TYPE := "{" TYPE_ELEMENT {"," TYPE_ELEMENT} "}" | "{ }"
+TYPE_ELEMENT := ["\"" STATIC_DESCRIPTION "\""] ["OPTIONAL"] ELEMENT_NAME ":" DATA_TYPE
+ELEMENT_NAME := <word>
+ENUM_TYPE := "[" <word> {"," <word>} "]"
  
-  DATA_TYPE primitives: text | image | audio | number | boolean
-  Compound: List[TYPE] | { field: TYPE, ... } | [val1, val2] (enum)
+DESCRIPTION_WITH_REFERENCES := STATIC_DESCRIPTION {DESCRIPTION_WITH_REFERENCES}
+                              | REFERENCE {DESCRIPTION_WITH_REFERENCES}
+STATIC_DESCRIPTION := <word> | <word> <space> STATIC_DESCRIPTION
+REFERENCE := "<REF>" ["*"] NAME "</REF>"
+NAME := SIMPLE_NAME | QUALIFIED_NAME | ARRAY_ACCESS | DICT_ACCESS
+SIMPLE_NAME := <word>
+<word> is a sequence of characters, digits and symbols without space
+<space> is white space or tab
  
-## Routing rule — which input goes where
+## Routing rule
  
-Input section A (StructuredSpec entities):
-  kind in {Run, Evidence, Record}  → DEFINE_VARIABLES
-    entity_id  → VAR_NAME
-    schema_notes → determine DATA_TYPE; use `text` as fallback
-    READONLY annotation → only for configuration constants never modified at runtime
+kind in {Run, Evidence, Record}  → DEFINE_VARIABLES
+  entity_id → VAR_NAME; schema_notes → DATA_TYPE (text as fallback)
+  READONLY only for configuration constants never modified at runtime.
  
-  kind == "Artifact"  → DEFINE_FILES (LEAF_FILE_DECLARATION)
-    entity_id  → FILE_NAME
-    file_path  → FILE_PATH; if empty use "< >"
-    schema_notes → determine DATA_TYPE
+kind == Artifact  → DEFINE_FILES (LEAF_FILE_DECLARATION)
+  entity_id → FILE_NAME; file_path → FILE_PATH (use "< >" if empty)
+  schema_notes → DATA_TYPE
  
-Input section B (P1 omit-files — data/document/image/audio files with read_priority=3):
-  These are files that exist in the skill package but were not needed for
-  normalization. They may still be referenced at runtime (read or produced).
-  → DEFINE_FILES (LEAF_FILE_DECLARATION)
-    file_name  → FILE_NAME (basename without extension, snake_case)
-    file_path  → actual relative path from the package root
-    kind       → use to select DATA_TYPE (image→image, audio→audio, else text)
+P1 omit-files (data/document/image/audio, read_priority=3) → DEFINE_FILES
+  kind → DATA_TYPE (image→image, audio→audio, else text)
  
 ## Provenance annotations
-For entities with provenance=ASSUMED or LOW_CONFIDENCE, add a DESCRIPTION
-string before the declaration that notes the assumption:
-  "Assumed: <schema_notes>"  var_name: DATA_TYPE
+ASSUMED or LOW_CONFIDENCE entities → add description "Assumed: <schema_notes>"
  
 ## Rules
 - Emit a block only when entities of that kind exist.
-- Files grouped under a common directory → use FOLDER_DECLARATION.
-- Use 4-space indentation.
-- Output ONLY the SPL blocks. No prose, no markdown fences, no explanation.
-"""
-
-
-d_v1 = """\
-You write the [DEFINE_GUARDRAIL:] and [DEFINE_APIS:] blocks of an SPL specification.
-
-## Why this input maps to GUARDRAIL and APIS
-All input capabilities are EXPLICIT (directly stated in source) and carry
-EXEC or NETWORK effects — meaning they invoke external tools or services.
-SPL requires these to be declared before the WORKER can reference them via
-[INVOKE] or [CALL] commands.
-
-Routing decision for each capability:
-  EXEC effect AND source describes parseable stdout output
-    (a specific token or exit code that signals pass/fail)
-    → [DEFINE_GUARDRAIL:]
-    A GUARDRAIL is an executable validation step.  The WORKER invokes it and
-    the result gates whether execution continues.
-
-  NETWORK effect OR source names an external API with an endpoint
-    → [DEFINE_APIS:]
-    An API is an external service call.  The WORKER calls it and uses the
-    response as a variable.
-
-  Interface is partially described (URL missing, params unclear)
-    → emit a skeleton block with # LOW_CONFIDENCE and # NEEDS_REVIEW: true
-    Do NOT invent parameters that are not in the source.
-
-## SYNTAX — GUARDRAIL
-
-  [DEFINE_GUARDRAIL: "one-sentence description" GuardrailName]
-      [INPUTS]
-          REQUIRED <REF> input_var </REF>
-      [END_INPUTS]
-      [OUTPUTS]
-          REQUIRED <REF> result_var </REF>
-      [END_OUTPUTS]
-      [MAIN_FLOW]
-          [SEQUENTIAL_BLOCK]
-              COMMAND-1 [COMMAND description RESULT result_var: DATA_TYPE]
-          [END_SEQUENTIAL_BLOCK]
-      [END_MAIN_FLOW]
-  [END_GUARDRAIL]
-
-  GuardrailName: PascalCase stable identifier, no spaces.
-  Use only inputs/outputs from the capability's `inputs` and `outputs` fields.
-
-## SYNTAX — APIS
-
-  [DEFINE_APIS:]
-      "description" ApiName <none|apikey|oauth> [RETRY N]
-      {
-          functions: [
-              {
-                  name: "function_name",
-                  url: "https://...",
-                  parameters: { parameters: [], controlled-input: false },
-                  return: { type: TYPE, controlled-output: false }
-              }
-          ]
-      }
-  [END_APIS]
-
-  ApiName: PascalCase stable identifier, no spaces.
-  Include only what `source_text` explicitly states.
-  If a URL is not stated, use "<url_not_stated>".
-  Set controlled-input/controlled-output to false unless source explicitly
-  describes validation logic.
-
-## RULES
-- Omit a block if no capabilities route to it.
+- Files sharing a directory → use FOLDER_DECLARATION.
 - Use 4-space indentation.
 - Output ONLY the SPL blocks. No prose, no markdown fences, no explanation.
 """
@@ -310,671 +164,184 @@ Routing decision for each capability:
 s4_d_v2 = """\
 Emit the [DEFINE_APIS:] block of an SPL specification.
  
-## Grammar
+## Complete grammar
  
-  APIS := "[DEFINE_APIS:]" {API_DECLARATION} "[END_APIS]"
+APIS := "[DEFINE_APIS:]" {API_DECLARATION} "[END_APIS]"
  
-  API_DECLARATION :=
-      ["\"" DESCRIPTION "\""]
-      API_NAME "<" AUTHENTICATION ">" ["RETRY" <number>] ["LOG" <api-exceptions>]
-      OPENAPI_SCHEMA
-      API_IN_SPL
+API_DECLARATION :=
+    ["\"" STATIC_DESCRIPTION "\""]
+    API_NAME "<" AUTHENTICATION ">" ["RETRY" <number>] ["LOG" <api-exceptions>]
+    OPENAPI_SCHEMA
+    API_IN_SPL
  
-  AUTHENTICATION := none | apikey | oauth
+AUTHENTICATION := "none" | "apikey" | "oauth"
+OPENAPI_SCHEMA  := STRUCTURED_TEXT   # OpenAPI schema in structured text
  
-  API_IN_SPL := "{" "functions:" "[" {FUNCTION} "]" "}"
-  FUNCTION := "{"
-      "name:"        STATIC_DESCRIPTION ","
-      "url:"         <url_string> ","
-      ["description:" STATIC_DESCRIPTION ","]
-      "parameters:"  "{" "parameters:" "[" {PARAMETER} "]" "," "controlled-input:" BOOL "}" ","
-      "return:"      "{" "type:" TYPE "," "controlled-output:" BOOL "}"
-  "}"
-  PARAMETER := "{" "required:" BOOL "," "name:" TEXT "," "type:" TYPE "}"
- 
-  API_NAME: PascalCase, derived from step_id (e.g., step.call_github_api → GithubApi).
-  If a URL is not stated in the source, use "<url_not_stated>".
-  If authentication type is not stated, use none.
+API_IN_SPL := "{" "functions:" "[" {FUNCTION} "]" "}"
+FUNCTION := "{"
+    "name:"        STATIC_DESCRIPTION ","
+    "url:"         <url_string> ","
+    ["description:" STATIC_DESCRIPTION ","]
+    "parameters:"  "{" "parameters:" "[" {PARAMETER} "]" "," "controlled-input:" BOOL "}" ","
+    "return:"      "{" "type:" PARAMETER_TYPE "," "controlled-output:" BOOL "}"
+"}"
+PARAMETER := "{" "required:" BOOL "," "name:" STATIC_DESCRIPTION "," "type:" PARAMETER_TYPE "}"
+PARAMETER_TYPE := TYPE_NAME | "List [" TYPE_NAME "]"
+TYPE_NAME := "text" | "image" | "audio" | "number" | "boolean"
+BOOL := "true" | "false"
+API_NAME := <word>   # PascalCase, derived from tool name or step_id
+STATIC_DESCRIPTION := <word> | <word> <space> STATIC_DESCRIPTION
+<word> is a sequence of characters, digits and symbols without space
+<space> is white space or tab
  
 ## How to use the input
  
-Each input entry is a workflow step with NETWORK in its effects field.
-For each such step:
-  1. Derive API_NAME from step_id in PascalCase.
-  2. Set AUTHENTICATION from tool_hint or source_text (apikey/oauth/none).
-  3. Add RETRY 3 if the source text mentions retry behavior; omit otherwise.
-  4. Populate API_IN_SPL.functions from tool_hint and source_text.
-     - Include only parameters explicitly stated in the source.
-     - Use "<url_not_stated>" if no URL is given.
-     - controlled-input and controlled-output: false unless stated.
-  5. If the step's interface is only partially described, still emit the block
-     with a DESCRIPTION noting "interface partially described — review required".
+Each entry is a workflow step with NETWORK in its effects.
+  1. Derive API_NAME in PascalCase from tool_hint or step_id.
+  2. AUTHENTICATION from source_text (apikey / oauth / none).
+  3. RETRY 3 only if source mentions retry behavior.
+  4. Functions: include only parameters explicitly stated in source.
+     Use "<url_not_stated>" if no URL given.
+     controlled-input and controlled-output: false unless stated.
+  5. If partially described, still emit with description "interface partially described".
  
 ## Rules
-- Emit this block only when network steps are provided.
-- One API_DECLARATION per network step (one step = one external service call).
+- Emit only when network steps are provided.
+- One API_DECLARATION per network step.
 - Use 4-space indentation.
 - Output ONLY the [DEFINE_APIS:] ... [END_APIS] block.
   No prose, no markdown fences, no explanation.
 """
 
-
-e_v1 = """\
-You write the [DEFINE_WORKER:] block of an SPL specification.
-The WORKER is the main executable body — it orchestrates all the named
-declarations (CONSTRAINTS, VARIABLES, FILES, GUARDRAILS, APIS) into a
-step-by-step process.
-
-## How each input section maps to WORKER syntax
-
-  Workflow steps (section F-structured)
-    prerequisites  →  [INPUTS] REQUIRED (if EXPLICIT) or OPTIONAL (if ASSUMED)
-    produces       →  [OUTPUTS] REQUIRED
-    step order     →  COMMANDs inside [MAIN_FLOW] [SEQUENTIAL_BLOCK], in source order
-
-    For each step's capability:
-      - cap is a GUARDRAIL name in the symbol table  →  [INVOKE GuardrailName ...]
-      - cap is an API name in the symbol table        →  [CALL ApiName ...]
-      - cap is ASSUMED / not in symbol table          →  [COMMAND description ...]
-                                                         + # ASSUMED: <reason>
-
-    For each step's execution_mode (determines COMMAND syntax):
-      - execution_mode == "PROMPT_TO_CODE"  →  [COMMAND PROMPT_TO_CODE description RESULT var: type]
-      - execution_mode == "CODE"            →  [COMMAND CODE description RESULT var: type]
-      - execution_mode == "LLM_PROMPT"      →  [COMMAND description RESULT var: type]
-      - execution_mode missing/default      →  [COMMAND description RESULT var: type]
-
-  Workflow prose (section F-prose)
-    Use the original text to identify branching conditions and loops.
-    Translate "if X then Y, otherwise Z" → DECISION-N [IF X] ... [ELSE] ... [END_IF]
-    Translate "for each item in list"    → DECISION-N [FOR each item in list] [END_FOR]
-
-  MEDIUM clauses (section B input — already filtered to MEDIUM)
-    One [ALTERNATIVE_FLOW:] per clause.
-    condition: a short predicate derived from the clause (e.g., "bbox_check_not_passed")
-    Always: [DISPLAY] of the original clause text + [INPUT DISPLAY "Confirm to proceed?"]
-
-  NON_COMPILABLE clauses (section C input)
-    One [EXCEPTION_FLOW:] per clause.
-    Always: LOG NON_COMPILABLE + [DISPLAY] of the verbatim original text.
-
-  Success criteria + examples (section G)
-    success_criteria.description  →  [OUTPUTS] semantic annotation
-    SectionBundle.EXAMPLES        →  [EXAMPLES] EXPECTED-WORKER-BEHAVIOR entries
-
-  HARD constraint violations
-    After any COMMAND that could violate a HARD constraint:
-    [THROW AspectName_violation "<original constraint text>"]
-    Use the exact AspectName from the symbol table.
-
-## SYMBOL TABLE
-Names already defined in the Round 1 blocks. Use these exact names.
-Do NOT invent new names for things already defined here.
-
-{{symbol_table}}
-
-## FULL SYNTAX
-
-  [DEFINE_WORKER: "one-sentence description" WorkerName]
-
-      [INPUTS]
-          REQUIRED <REF> var_or_file_name </REF>
-          OPTIONAL <REF> var_or_file_name </REF>
-      [END_INPUTS]
-
-      [OUTPUTS]
-          REQUIRED <REF> var_or_file_name </REF>
-      [END_OUTPUTS]
-
-      [MAIN_FLOW]
-          [SEQUENTIAL_BLOCK]
-              COMMAND-1 [COMMAND description RESULT var: TYPE]
-              COMMAND-1 [COMMAND PROMPT_TO_CODE description RESULT var: TYPE]
-              COMMAND-1 [COMMAND CODE description RESULT var: TYPE]
-              COMMAND-2 [INVOKE GuardrailName WITH {input: <REF>var</REF>} RESPONSE result: TYPE]
-              COMMAND-3 [CALL ApiName WITH {param: value} RESPONSE data: TYPE]
-              COMMAND-4 [COMMAND THINK_ALOUD description RESULT var: TYPE]
-              COMMAND-5 [INPUT DISPLAY "prompt" VALUE var: TYPE]
-              COMMAND-6 [DISPLAY description]
-              COMMAND-7 [THROW AspectName_violation "message"]
-          [END_SEQUENTIAL_BLOCK]
-
-          DECISION-N [IF condition]
-              COMMAND-N [COMMAND ...]
-          [ELSEIF condition]
-              COMMAND-N [COMMAND ...]
-          [ELSE]
-              COMMAND-N [COMMAND ...]
-          [END_IF]
-
-          DECISION-N [FOR each item in collection]
-              COMMAND-N [COMMAND ...]
-          [END_FOR]
-      [END_MAIN_FLOW]
-
-      [ALTERNATIVE_FLOW: <condition from MEDIUM clause>]
-          [SEQUENTIAL_BLOCK]
-              COMMAND-N [DISPLAY [MEDIUM gate: <verbatim MEDIUM clause text>]]
-              COMMAND-N [INPUT DISPLAY "Confirm to proceed?" VALUE confirmed: boolean]
-          [END_SEQUENTIAL_BLOCK]
-      [END_ALTERNATIVE_FLOW]
-
-      [EXCEPTION_FLOW: <condition from NON_COMPILABLE clause>]
-          LOG NON_COMPILABLE
-          [SEQUENTIAL_BLOCK]
-              COMMAND-N [DISPLAY <verbatim NON_COMPILABLE clause text>]
-          [END_SEQUENTIAL_BLOCK]
-      [END_EXCEPTION_FLOW]
-
-      [EXAMPLES]
-          <EXPECTED-WORKER-BEHAVIOR>
-              {
-                  inputs: { var: value },
-                  expected-outputs: { var: value },
-                  execution-path: COMMAND-1, DECISION-1, COMMAND-3
-              }
-          </EXPECTED-WORKER-BEHAVIOR>
-      [END_EXAMPLES]
-
-  [END_WORKER]
-
-## ANNOTATION CONVENTION
-Add to every COMMAND that maps to a classified clause:
-  # SOURCE_REF: <file>:<clause_id>
-  # CONFIDENCE: <float>
-  # NEEDS_REVIEW: true | false
-
-## RULES
-- Use 4-space indentation throughout.
-- Output ONLY the [DEFINE_WORKER:] ... [END_WORKER] block.
-  No prose, no markdown fences, no explanation.
-"""
-
-s4_e_v2 = """\
-You write the [DEFINE_WORKER:] block of an SPL specification.
-The WORKER orchestrates all declared names (CONSTRAINTS, VARIABLES, FILES, APIS)
-into a step-by-step process.
- 
-## SYMBOL TABLE
-Names already defined in Round 1 blocks.  Use these exact names.
-Do NOT invent new names for things already defined here.
- 
-{{symbol_table}}
- 
-─────────────────────────────────────────────────────────────────────────
-## MAIN_FLOW
- 
-ALL workflow steps (section A) go in MAIN_FLOW, in procedure order.
-Do not filter out NETWORK or validation-gate steps.
- 
-Step type mapping:
-  step.effects contains NETWORK  → [CALL ApiName WITH {...} RESPONSE var: TYPE]
-                                    Use the ApiName from the APIS symbol table.
-  step.execution_mode == "PROMPT_TO_CODE"
-                                 → [COMMAND PROMPT_TO_CODE description RESULT var: TYPE]
-  step.execution_mode == "CODE"  → [COMMAND CODE description RESULT var: TYPE]
-  all other steps                → [COMMAND description RESULT var: TYPE]
-                                    (omit RESULT clause if the step produces nothing)
- 
-  step.is_validation_gate == true → regular [COMMAND ...] as above;
-    the failure path is covered by an EXCEPTION_FLOW block (see below).
- 
-Use branching from the original workflow prose (section B):
-  "if X then Y, otherwise Z"  → DECISION-N [IF X] ... [ELSE] ... [END_IF]
-  "for each item"             → DECISION-N [FOR each item ...] [END_FOR]
- 
-Interaction requirements (section C) — place each [INPUT DISPLAY ...] command
-immediately BEFORE the step it gates:
-  interaction_type == ASK    → [INPUT DISPLAY "prompt" VALUE answer: text]
-  interaction_type == STOP   → [INPUT DISPLAY "prompt" VALUE confirmed: boolean]
-                               + DECISION-N [IF confirmed == false]
-                                     COMMAND-N [DISPLAY "Cannot proceed: reason"]
-                                 [END_IF]
-  interaction_type == ELICIT → [INPUT DISPLAY "prompt" VALUE choice: text]
- 
-INPUTS / OUTPUTS:
-  prerequisites that no prior step produces → [INPUTS] REQUIRED or OPTIONAL
-  produces of the final step(s)             → [OUTPUTS] REQUIRED
- 
-Apply constraint aspect names to relevant inputs/outputs:
-  <APPLY_CONSTRAINTS> AspectName1 AspectName2 </APPLY_CONSTRAINTS>
-  Use constraint names from the symbol table; match semantically to the data.
- 
-─────────────────────────────────────────────────────────────────────────
-## ALTERNATIVE_FLOW
- 
-Only generate if section D (alternative_flows) is non-empty.
-Each AlternativeFlowSpec → one [ALTERNATIVE_FLOW: condition] block.
-The commands list provides the body content verbatim from the original document.
-Map each command string to the most appropriate SPL COMMAND type:
-  network fetch         → [CALL ApiName ...]
-  display/inform user   → [DISPLAY "..."]
-  user decision needed  → [INPUT DISPLAY "..." VALUE ...]
-  all other actions     → [COMMAND description ...]
- 
-Pattern:
-  [ALTERNATIVE_FLOW: <condition>]
-      [SEQUENTIAL_BLOCK]
-          COMMAND-N [COMMAND description]
-          ...
-      [END_SEQUENTIAL_BLOCK]
-  [END_ALTERNATIVE_FLOW]
- 
-─────────────────────────────────────────────────────────────────────────
-## EXCEPTION_FLOW
- 
-Only generate if section E (exception_flows) is non-empty.
-Each ExceptionFlowSpec → one [EXCEPTION_FLOW: trigger] block.
-The trigger field becomes the condition label verbatim.
-The commands list provides the body content.
- 
-Pattern:
-  [EXCEPTION_FLOW: <trigger>]
-      [SEQUENTIAL_BLOCK]
-          COMMAND-N [DISPLAY "..."]
-          COMMAND-N [INPUT DISPLAY "..." VALUE confirmed: boolean]
-          ...
-      [END_SEQUENTIAL_BLOCK]
-  [END_EXCEPTION_FLOW]
- 
-─────────────────────────────────────────────────────────────────────────
-## FULL SYNTAX
- 
-  [DEFINE_WORKER: "one-sentence description" WorkerName]
- 
-      [INPUTS]
-          REQUIRED <APPLY_CONSTRAINTS> AspectName </APPLY_CONSTRAINTS> <REF> var_or_file </REF>
-          OPTIONAL <REF> var_or_file </REF>
-      [END_INPUTS]
- 
-      [OUTPUTS]
-          REQUIRED <APPLY_CONSTRAINTS> AspectName </APPLY_CONSTRAINTS> <REF> var_or_file </REF>
-      [END_OUTPUTS]
- 
-      [MAIN_FLOW]
-          [SEQUENTIAL_BLOCK]
-              COMMAND-1 [INPUT DISPLAY "prompt" VALUE answer: text]
-              COMMAND-2 [COMMAND description RESULT var: TYPE]
-              COMMAND-3 [COMMAND PROMPT_TO_CODE description RESULT var: TYPE]
-              COMMAND-4 [COMMAND CODE description RESULT var: TYPE]
-              COMMAND-5 [CALL ApiName WITH {param: value} RESPONSE data: TYPE]
-              COMMAND-6 [DISPLAY "message"]
-          [END_SEQUENTIAL_BLOCK]
- 
-          DECISION-N [IF condition]
-              COMMAND-N [COMMAND ...]
-          [ELSEIF condition]
-              COMMAND-N [COMMAND ...]
-          [ELSE]
-              COMMAND-N [COMMAND ...]
-          [END_IF]
- 
-          DECISION-N [FOR each item in collection]
-              COMMAND-N [COMMAND ...]
-          [END_FOR]
-      [END_MAIN_FLOW]
- 
-      [ALTERNATIVE_FLOW: <condition>]
-          [SEQUENTIAL_BLOCK]
-              COMMAND-N [COMMAND ...]
-              COMMAND-N [DISPLAY "..."]
-              COMMAND-N [INPUT DISPLAY "..." VALUE confirmed: boolean]
-          [END_SEQUENTIAL_BLOCK]
-      [END_ALTERNATIVE_FLOW]
- 
-      [EXCEPTION_FLOW: <trigger>]
-          [SEQUENTIAL_BLOCK]
-              COMMAND-N [DISPLAY "..."]
-              COMMAND-N [INPUT DISPLAY "..." VALUE confirmed: boolean]
-          [END_SEQUENTIAL_BLOCK]
-      [END_EXCEPTION_FLOW]
- 
-  [END_WORKER]
- 
-## ANNOTATION CONVENTION
-For each COMMAND that maps to a classified clause, append:
-  # SOURCE_REF: <file>:<clause_id>
-  # CONFIDENCE: <float>
-  # NEEDS_REVIEW: true | false
- 
-## RULES
-- Global sequential COMMAND numbering: COMMAND-1, COMMAND-2, ... (never restart)
-- Use 4-space indentation throughout.
-- Do NOT generate an [EXAMPLES] block — that is produced separately.
-- Output ONLY the [DEFINE_WORKER:] ... [END_WORKER] block.
-  No prose, no markdown fences, no explanation.
-"""
-
-s4_e_v3 = """\
-You write the [DEFINE_WORKER:] block of an SPL specification.
-The WORKER orchestrates all declared names (CONSTRAINTS, VARIABLES, FILES, APIS)
-into a step-by-step process.
- 
-## SYMBOL TABLE
-Names already defined in Round 1 blocks.  Use these exact names.
-Do NOT invent new names for things already defined here.
- 
-{{symbol_table}}
- 
-─────────────────────────────────────────────────────────────────────────
-## MAIN_FLOW
- 
-ALL workflow steps (section A) go in MAIN_FLOW, in procedure order.
-Do not filter out NETWORK or validation-gate steps.
- 
-Step type mapping:
-  step.effects contains NETWORK  → [CALL ApiName WITH {...} RESPONSE var: TYPE]
-                                    Use the ApiName from the APIS symbol table.
-  step.execution_mode == "PROMPT_TO_CODE"
-                                 → [COMMAND PROMPT_TO_CODE description RESULT var: TYPE]
-  step.execution_mode == "CODE"  → [COMMAND CODE description RESULT var: TYPE]
-  all other steps                → [COMMAND description RESULT var: TYPE]
-                                    (omit RESULT clause if the step produces nothing)
- 
-  step.is_validation_gate == true → regular [COMMAND ...] as above;
-    the failure path is covered by an EXCEPTION_FLOW block (see below).
- 
-Use branching from the original workflow prose (section B):
-  "if X then Y, otherwise Z"  → DECISION-N [IF X] ... [ELSE] ... [END_IF]
-  "for each item"             → DECISION-N [FOR each item ...] [END_FOR]
- 
-Interaction requirements (section C) — place each [INPUT DISPLAY ...] command
-immediately BEFORE the step it gates:
-  interaction_type == ASK    → [INPUT DISPLAY "prompt" VALUE answer: text]
-  interaction_type == STOP   → [INPUT DISPLAY "prompt" VALUE confirmed: boolean]
-                               + DECISION-N [IF confirmed == false]
-                                     COMMAND-N [DISPLAY "Cannot proceed: reason"]
-                                 [END_IF]
-  interaction_type == ELICIT → [INPUT DISPLAY "prompt" VALUE choice: text]
- 
-INPUTS / OUTPUTS:
-  prerequisites that no prior step produces → [INPUTS] REQUIRED or OPTIONAL
-  produces of the final step(s)             → [OUTPUTS] REQUIRED
- 
-Apply constraint aspect names to relevant inputs/outputs:
-  <APPLY_CONSTRAINTS> AspectName1 AspectName2 </APPLY_CONSTRAINTS>
-  Use constraint names from the symbol table; match semantically to the data.
- 
-─────────────────────────────────────────────────────────────────────────
-## ALTERNATIVE_FLOW
- 
-Only generate if section D (alternative_flows) is non-empty.
-Each AlternativeFlowSpec → one [ALTERNATIVE_FLOW: condition] block.
-The condition field is the CONDITION token verbatim (free text).
-The steps list provides the body in sequence.
- 
-Map each FlowStep to the most appropriate SPL command type:
-  step.tool_hint set and NETWORK implied → [CALL ApiName WITH {...} RESPONSE ...]
-  step.execution_mode == "PROMPT_TO_CODE" → [COMMAND PROMPT_TO_CODE description]
-  step.execution_mode == "CODE"           → [COMMAND CODE description]
-  needs user confirmation                 → [INPUT DISPLAY "..." VALUE confirmed: boolean]
-  display-only                            → [DISPLAY "..."]
-  all others                              → [COMMAND description]
- 
-Pattern:
-  [ALTERNATIVE_FLOW: <condition text>]
-      [SEQUENTIAL_BLOCK]
-          COMMAND-N [COMMAND description]
-          ...
-      [END_SEQUENTIAL_BLOCK]
-  [END_ALTERNATIVE_FLOW]
- 
-─────────────────────────────────────────────────────────────────────────
-## EXCEPTION_FLOW
- 
-Only generate if section E (exception_flows) is non-empty.
-Each ExceptionFlowSpec → one [EXCEPTION_FLOW: condition] block.
-The condition field is the CONDITION token verbatim (free text).
-If log_ref is non-empty, append: LOG <log_ref> on the same line as the condition.
-The steps list provides the body in sequence.
- 
-Pattern (no LOG):
-  [EXCEPTION_FLOW: <condition text>]
-      [SEQUENTIAL_BLOCK]
-          COMMAND-N [DISPLAY "..."]
-          COMMAND-N [INPUT DISPLAY "..." VALUE confirmed: boolean]
-          ...
-      [END_SEQUENTIAL_BLOCK]
-  [END_EXCEPTION_FLOW]
- 
-Pattern (with LOG):
-  [EXCEPTION_FLOW: <condition text>] LOG <log_ref>
-      [SEQUENTIAL_BLOCK]
-          COMMAND-N [DISPLAY "..."]
-          ...
-      [END_SEQUENTIAL_BLOCK]
-  [END_EXCEPTION_FLOW]
- 
-─────────────────────────────────────────────────────────────────────────
-## FULL SYNTAX
- 
-  [DEFINE_WORKER: "one-sentence description" WorkerName]
- 
-      [INPUTS]
-          REQUIRED <APPLY_CONSTRAINTS> AspectName </APPLY_CONSTRAINTS> <REF> var_or_file </REF>
-          OPTIONAL <REF> var_or_file </REF>
-      [END_INPUTS]
- 
-      [OUTPUTS]
-          REQUIRED <APPLY_CONSTRAINTS> AspectName </APPLY_CONSTRAINTS> <REF> var_or_file </REF>
-      [END_OUTPUTS]
- 
-      [MAIN_FLOW]
-          [SEQUENTIAL_BLOCK]
-              COMMAND-1 [INPUT DISPLAY "prompt" VALUE answer: text]
-              COMMAND-2 [COMMAND description RESULT var: TYPE]
-              COMMAND-3 [COMMAND PROMPT_TO_CODE description RESULT var: TYPE]
-              COMMAND-4 [COMMAND CODE description RESULT var: TYPE]
-              COMMAND-5 [CALL ApiName WITH {param: value} RESPONSE data: TYPE]
-              COMMAND-6 [DISPLAY "message"]
-          [END_SEQUENTIAL_BLOCK]
- 
-          DECISION-N [IF condition]
-              COMMAND-N [COMMAND ...]
-          [ELSEIF condition]
-              COMMAND-N [COMMAND ...]
-          [ELSE]
-              COMMAND-N [COMMAND ...]
-          [END_IF]
- 
-          DECISION-N [FOR each item in collection]
-              COMMAND-N [COMMAND ...]
-          [END_FOR]
-      [END_MAIN_FLOW]
- 
-      [ALTERNATIVE_FLOW: <condition — free text from AlternativeFlowSpec.condition>]
-          [SEQUENTIAL_BLOCK]
-              COMMAND-N [COMMAND ...]
-              COMMAND-N [DISPLAY "..."]
-              COMMAND-N [INPUT DISPLAY "..." VALUE confirmed: boolean]
-          [END_SEQUENTIAL_BLOCK]
-      [END_ALTERNATIVE_FLOW]
- 
-      [EXCEPTION_FLOW: <condition — free text from ExceptionFlowSpec.condition>] LOG <log_ref if non-empty>
-          [SEQUENTIAL_BLOCK]
-              COMMAND-N [DISPLAY "..."]
-              COMMAND-N [INPUT DISPLAY "..." VALUE confirmed: boolean]
-          [END_SEQUENTIAL_BLOCK]
-      [END_EXCEPTION_FLOW]
- 
-  [END_WORKER]
- 
-## ANNOTATION CONVENTION
-For each COMMAND that maps to a classified clause, append:
-  # SOURCE_REF: <file>:<clause_id>
-  # CONFIDENCE: <float>
-  # NEEDS_REVIEW: true | false
- 
-## RULES
-- Global sequential COMMAND numbering: COMMAND-1, COMMAND-2, ... (never restart)
-- Use 4-space indentation throughout.
-- Do NOT generate an [EXAMPLES] block — that is produced separately.
-- Output ONLY the [DEFINE_WORKER:] ... [END_WORKER] block.
-  No prose, no markdown fences, no explanation.
-"""
-
 s4_e_v4 = """\
-You write the [DEFINE_WORKER:] block of an SPL specification.
-The WORKER orchestrates all declared names (CONSTRAINTS, VARIABLES, FILES, APIS)
-into a step-by-step process.
+Emit the [DEFINE_WORKER:] block of an SPL specification.
+The WORKER orchestrates all declared VARIABLES, FILES, and APIS into a
+step-by-step process.
  
-## SYMBOL TABLE
-Names already defined in Round 1 blocks.  Use these exact names.
-Do NOT invent new names for things already defined here.
+## Symbol table — declared names from DEFINE_VARIABLES and DEFINE_FILES
+Use these exact names in <REF> references. Do NOT invent new names.
  
 {{symbol_table}}
  
-─────────────────────────────────────────────────────────────────────────
-## MAIN_FLOW
+## Complete grammar
  
-ALL workflow steps (section A) go in MAIN_FLOW, in procedure order.
-Do not filter out NETWORK or validation-gate steps.
+WORKER_INSTRUCTION :=
+    "[DEFINE_WORKER:" ["\"" STATIC_DESCRIPTION "\""] WORKER_NAME "]"
+    [INPUTS] [OUTPUTS]
+    MAIN_FLOW {ALTERNATIVE_FLOW} {EXCEPTION_FLOW}
+    [EXAMPLES]
+    "[END_WORKER]"
+WORKER_NAME := <word>
  
-Step type mapping (use execution_mode and effects to choose the command form):
-  step.effects contains NETWORK        → [CALL ApiName WITH {...} RESPONSE var: TYPE]
-                                          Use the ApiName from the APIS symbol table.
-  step.execution_mode == "PROMPT_TO_CODE"
-                                       → [COMMAND PROMPT_TO_CODE description RESULT var: TYPE]
-  step.execution_mode == "CODE"        → [COMMAND CODE description RESULT var: TYPE]
-  step.execution_mode == "USER_INPUT"  → [INPUT DISPLAY "description" VALUE answer: TYPE]
-                                          TYPE is text for open answers, boolean for
-                                          confirmations, or a list enum for selections.
-                                          If it is a confirmation that blocks progress:
-                                          add DECISION-N [IF confirmed == false]
-                                                COMMAND-N [DISPLAY "Cannot proceed: reason"]
-                                              [END_IF]
-  all other steps                      → [COMMAND description RESULT var: TYPE]
-                                          (omit RESULT clause if the step produces nothing)
+INPUTS  := "[INPUTS]"  {["REQUIRED" | "OPTIONAL"] REFERENCE_DATA} "[END_INPUTS]"
+OUTPUTS := "[OUTPUTS]" {["REQUIRED" | "OPTIONAL"] REFERENCE_DATA} "[END_OUTPUTS]"
+REFERENCE_DATA := "<REF>" NAME "</REF>"
  
-  step.is_validation_gate == true → regular [COMMAND ...] as above;
-    the failure path is covered by an EXCEPTION_FLOW block (see below).
+MAIN_FLOW        := "[MAIN_FLOW]" {BLOCK} "[END_MAIN_FLOW]"
+ALTERNATIVE_FLOW := "[ALTERNATIVE_FLOW:" CONDITION "]" {BLOCK} "[END_ALTERNATIVE_FLOW]"
+EXCEPTION_FLOW   := "[EXCEPTION_FLOW:" CONDITION "]" ["LOG" DESCRIPTION_WITH_REFERENCES] {BLOCK} "[END_EXCEPTION_FLOW]"
+CONDITION        := DESCRIPTION_WITH_REFERENCES
  
-Use branching from the original workflow prose (section B):
-  "if X then Y, otherwise Z"  → DECISION-N [IF X] ... [ELSE] ... [END_IF]
-  "for each item"             → DECISION-N [FOR each item ...] [END_FOR]
+BLOCK            := SEQUENTIAL_BLOCK | IF_BLOCK | LOOP_BLOCK
+SEQUENTIAL_BLOCK := "[SEQUENTIAL_BLOCK]" {COMMAND} "[END_SEQUENTIAL_BLOCK]"
+IF_BLOCK    := DECISION_INDEX "[IF" CONDITION "]" {COMMAND}
+               {"[ELSEIF" CONDITION "]" {COMMAND}}
+               ["[ELSE]" {COMMAND}]
+               "[END_IF]"
+WHILE_BLOCK := DECISION_INDEX "[WHILE" CONDITION "]" {COMMAND} "[END_WHILE]"
+FOR_BLOCK   := DECISION_INDEX "[FOR" CONDITION "]" {COMMAND} "[END_FOR]"
+DECISION_INDEX := "DECISION-" <number>
+ 
+COMMAND       := COMMAND_INDEX COMMAND_BODY
+COMMAND_INDEX := "COMMAND-" <number>
+COMMAND_BODY  := GENERAL_COMMAND | CALL_API | REQUEST_INPUT | DISPLAY_MESSAGE
+ 
+GENERAL_COMMAND :=
+    "[COMMAND" ["PROMPT_TO_CODE" | "CODE"]
+    DESCRIPTION_WITH_REFERENCES
+    ["STOP" DESCRIPTION_WITH_REFERENCES]
+    ["RESULT" COMMAND_RESULT ["SET" | "APPEND"]]
+    "]"
+DISPLAY_MESSAGE := "[DISPLAY" DESCRIPTION_WITH_REFERENCES "]"
+REQUEST_INPUT   :=
+    "[INPUT" ["DISPLAY"] DESCRIPTION_WITH_REFERENCES
+    "VALUE" COMMAND_RESULT ["SET" | "APPEND"]
+    "]"
+CALL_API :=
+    "[CALL" API_NAME {"," API_NAME}
+    ["WITH" ARGUMENT_LIST]
+    ["RESPONSE" COMMAND_RESULT ["SET" | "APPEND"]]
+    "]"
+ 
+COMMAND_RESULT := VAR_NAME ":" DATA_TYPE | REFERENCE
+DATA_TYPE := "text" | "image" | "audio" | "number" | "boolean"
+           | "List [" DATA_TYPE "]"
+           | "{" TYPE_ELEMENT {"," TYPE_ELEMENT} "}" | "{ }"
+TYPE_ELEMENT   := ["OPTIONAL"] ELEMENT_NAME ":" DATA_TYPE
+ELEMENT_NAME   := <word>
+VAR_NAME       := <word>
+ 
+DESCRIPTION_WITH_REFERENCES := STATIC_DESCRIPTION {DESCRIPTION_WITH_REFERENCES}
+                              | REFERENCE {DESCRIPTION_WITH_REFERENCES}
+STATIC_DESCRIPTION := <word> | <word> <space> STATIC_DESCRIPTION
+REFERENCE := "<REF>" ["*"] NAME "</REF>"
+NAME := SIMPLE_NAME | QUALIFIED_NAME | ARRAY_ACCESS | DICT_ACCESS
+SIMPLE_NAME    := <word>
+QUALIFIED_NAME := NAME "." SIMPLE_NAME
+ARRAY_ACCESS   := NAME "[" [<number>] "]"
+DICT_ACCESS    := NAME "[" SIMPLE_NAME "]"
+<word> is a sequence of characters, digits and symbols without space
+<space> is white space or tab
+ 
+## MAIN_FLOW construction
+ 
+ALL workflow steps (section A) go in MAIN_FLOW in procedure order.
+Do not filter out NETWORK, USER_INPUT, or validation-gate steps.
+ 
+Step → command mapping (use execution_mode and effects):
+  effects contains NETWORK         → [CALL ApiName WITH {...} RESPONSE var: TYPE]
+                                      Use API names from section C (DEFINE_APIS).
+  execution_mode == PROMPT_TO_CODE → [COMMAND PROMPT_TO_CODE description RESULT var: TYPE]
+  execution_mode == CODE           → [COMMAND CODE description RESULT var: TYPE]
+  execution_mode == USER_INPUT     → [INPUT DISPLAY "description" VALUE answer: TYPE]
+                                      TYPE: text (open), boolean (confirm), [v1,v2] (select).
+                                      Confirmation blocking progress:
+                                        DECISION-N [IF confirmed == false]
+                                          COMMAND-N [DISPLAY "Cannot proceed: reason"]
+                                        [END_IF]
+  all others                       → [COMMAND description RESULT var: TYPE]
+                                      (omit RESULT if step produces nothing)
+ 
+  is_validation_gate == true → regular [COMMAND ...]; failure handled by EXCEPTION_FLOW.
+ 
+Branching from workflow prose (section B):
+  "if X then Y, otherwise Z" → DECISION-N [IF X] ... [ELSE] ... [END_IF]
+  "for each item"            → DECISION-N [FOR each item ...] [END_FOR]
+  "while condition"          → DECISION-N [WHILE condition ...] [END_WHILE]
  
 INPUTS / OUTPUTS:
-  prerequisites that no prior step produces → [INPUTS] REQUIRED or OPTIONAL
-  produces of the final step(s)             → [OUTPUTS] REQUIRED
+  prerequisites not produced by any prior step → [INPUTS] REQUIRED or OPTIONAL
+  produces of the final step(s)               → [OUTPUTS] REQUIRED
  
-Apply constraint aspect names to relevant inputs/outputs:
-  <APPLY_CONSTRAINTS> AspectName1 AspectName2 </APPLY_CONSTRAINTS>
-  Use constraint names from the symbol table; match semantically to the data.
- 
-─────────────────────────────────────────────────────────────────────────
 ## ALTERNATIVE_FLOW
  
-Only generate if section D (alternative_flows) is non-empty.
-Each AlternativeFlowSpec → one [ALTERNATIVE_FLOW: condition] block.
-The condition field is the CONDITION token verbatim (free text).
-The steps list provides the body in sequence.
+One block per entry in section D (alternative_flows). Omit if section D is empty.
+  condition  → CONDITION (free text from AlternativeFlowSpec.condition)
+  steps list → body; use same command mapping as MAIN_FLOW
  
-Map each FlowStep to the most appropriate SPL command type:
-  step.tool_hint set and NETWORK implied → [CALL ApiName WITH {...} RESPONSE ...]
-  step.execution_mode == "PROMPT_TO_CODE" → [COMMAND PROMPT_TO_CODE description]
-  step.execution_mode == "CODE"           → [COMMAND CODE description]
-  needs user confirmation                 → [INPUT DISPLAY "..." VALUE confirmed: boolean]
-  display-only                            → [DISPLAY "..."]
-  all others                              → [COMMAND description]
- 
-Pattern:
-  [ALTERNATIVE_FLOW: <condition text>]
-      [SEQUENTIAL_BLOCK]
-          COMMAND-N [COMMAND description]
-          ...
-      [END_SEQUENTIAL_BLOCK]
-  [END_ALTERNATIVE_FLOW]
- 
-─────────────────────────────────────────────────────────────────────────
 ## EXCEPTION_FLOW
  
-Only generate if section E (exception_flows) is non-empty.
-Each ExceptionFlowSpec → one [EXCEPTION_FLOW: condition] block.
-The condition field is the CONDITION token verbatim (free text).
-If log_ref is non-empty, append: LOG <log_ref> on the same line as the condition.
-The steps list provides the body in sequence.
+One block per entry in section E (exception_flows). Omit if section E is empty.
+  condition → CONDITION (free text from ExceptionFlowSpec.condition)
+  log_ref   → if non-empty: LOG <log_ref> on the opening line
+  steps list → body; use same command mapping as MAIN_FLOW
  
-Pattern (no LOG):
-  [EXCEPTION_FLOW: <condition text>]
-      [SEQUENTIAL_BLOCK]
-          COMMAND-N [DISPLAY "..."]
-          COMMAND-N [INPUT DISPLAY "..." VALUE confirmed: boolean]
-          ...
-      [END_SEQUENTIAL_BLOCK]
-  [END_EXCEPTION_FLOW]
- 
-Pattern (with LOG):
-  [EXCEPTION_FLOW: <condition text>] LOG <log_ref>
-      [SEQUENTIAL_BLOCK]
-          COMMAND-N [DISPLAY "..."]
-          ...
-      [END_SEQUENTIAL_BLOCK]
-  [END_EXCEPTION_FLOW]
- 
-─────────────────────────────────────────────────────────────────────────
-## FULL SYNTAX
- 
-  [DEFINE_WORKER: "one-sentence description" WorkerName]
- 
-      [INPUTS]
-          REQUIRED <APPLY_CONSTRAINTS> AspectName </APPLY_CONSTRAINTS> <REF> var_or_file </REF>
-          OPTIONAL <REF> var_or_file </REF>
-      [END_INPUTS]
- 
-      [OUTPUTS]
-          REQUIRED <APPLY_CONSTRAINTS> AspectName </APPLY_CONSTRAINTS> <REF> var_or_file </REF>
-      [END_OUTPUTS]
- 
-      [MAIN_FLOW]
-          [SEQUENTIAL_BLOCK]
-              COMMAND-1 [INPUT DISPLAY "prompt" VALUE answer: text]   # execution_mode=USER_INPUT
-              COMMAND-2 [COMMAND description RESULT var: TYPE]
-              COMMAND-3 [COMMAND PROMPT_TO_CODE description RESULT var: TYPE]
-              COMMAND-4 [COMMAND CODE description RESULT var: TYPE]
-              COMMAND-5 [CALL ApiName WITH {param: value} RESPONSE data: TYPE]
-              COMMAND-6 [DISPLAY "message"]
-          [END_SEQUENTIAL_BLOCK]
- 
-          DECISION-N [IF condition]
-              COMMAND-N [COMMAND ...]
-          [ELSEIF condition]
-              COMMAND-N [COMMAND ...]
-          [ELSE]
-              COMMAND-N [COMMAND ...]
-          [END_IF]
- 
-          DECISION-N [FOR each item in collection]
-              COMMAND-N [COMMAND ...]
-          [END_FOR]
-      [END_MAIN_FLOW]
- 
-      [ALTERNATIVE_FLOW: <condition — free text from AlternativeFlowSpec.condition>]
-          [SEQUENTIAL_BLOCK]
-              COMMAND-N [COMMAND ...]
-              COMMAND-N [DISPLAY "..."]
-              COMMAND-N [INPUT DISPLAY "..." VALUE confirmed: boolean]
-          [END_SEQUENTIAL_BLOCK]
-      [END_ALTERNATIVE_FLOW]
- 
-      [EXCEPTION_FLOW: <condition — free text from ExceptionFlowSpec.condition>] LOG <log_ref if non-empty>
-          [SEQUENTIAL_BLOCK]
-              COMMAND-N [DISPLAY "..."]
-              COMMAND-N [INPUT DISPLAY "..." VALUE confirmed: boolean]
-          [END_SEQUENTIAL_BLOCK]
-      [END_EXCEPTION_FLOW]
- 
-  [END_WORKER]
- 
-## ANNOTATION CONVENTION
-For each COMMAND that maps to a classified clause, append:
-  # SOURCE_REF: <file>:<clause_id>
-  # CONFIDENCE: <float>
-  # NEEDS_REVIEW: true | false
- 
-## RULES
+## Rules
 - Global sequential COMMAND numbering: COMMAND-1, COMMAND-2, ... (never restart)
+- Global sequential DECISION numbering: DECISION-1, DECISION-2, ... (never restart)
+- BLOCKS can be any combination and any number of SEQUENTIAL_BLOCK, IF_BLOCK, LOOP_BLOCK.
+- Do NOT generate an [EXAMPLES] block — produced separately by S4F.
 - Use 4-space indentation throughout.
-- Do NOT generate an [EXAMPLES] block — that is produced separately.
 - Output ONLY the [DEFINE_WORKER:] ... [END_WORKER] block.
   No prose, no markdown fences, no explanation.
 """

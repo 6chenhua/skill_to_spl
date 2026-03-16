@@ -1,7 +1,12 @@
 {
   "intent": [
     {
-      "text": "Applies Anthropic's official brand colors and typography to any sort of artifact that may benefit from having Anthropic's look-and-feel. Use it when brand colors or style guidelines, visual formatting, or company design standards apply.",
+      "text": "Applies Anthropic's official brand colors and typography to any sort of artifact that may benefit from having Anthropic's look-and-feel.",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "Use it when brand colors or style guidelines, visual formatting, or company design standards apply.",
       "source": "SKILL.md",
       "multi": false
     },
@@ -84,6 +89,11 @@
     },
     {
       "text": "Preserves readability across all systems",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "Preserves text hierarchy and formatting",
       "source": "SKILL.md",
       "multi": false
     },

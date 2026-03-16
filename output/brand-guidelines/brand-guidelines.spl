@@ -3,47 +3,32 @@
 
 
 [DEFINE_PERSONA:]
-    ROLE: Applies Anthropic's official brand colors and typography to any sort of artifact that may benefit from having Anthropic's look-and-feel.
+ROLE: Applies Anthropic's official brand colors and typography to any sort of artifact that may benefit from having Anthropic's look-and-feel.
+DOMAIN: branding
+EXPERTISE: corporate identity
 [END_PERSONA]
 
 [DEFINE_CONSTRAINTS:]
-    [SOFT] FontPreInstallation: Fonts should be pre-installed in your environment for best results
+    Fonts: Fonts should be pre-installed in your environment for best results (SKILL.md)
 [END_CONSTRAINTS]
 
 [DEFINE_VARIABLES:]
-    """Assumed: This is a configuration constant."""
-    config_value: number
-    run_id: text
-    """Assumed: This is a record of events."""
-    event_log: List[text]
 [END_VARIABLES]
 
 [DEFINE_FILES:]
-    """Assumed: This is a log file."""
-    log_file < >: text
-    image_data < >: image
-    audio_recording < >: audio
-    document_file < >: text
-    data_file < >: text
 [END_FILES]
 
-[DEFINE_WORKER: "one-sentence description" WorkerName]
+There are no workflow steps, alternative flows, or exception flows provided. Therefore, the [DEFINE_WORKER:] block will be minimal, containing only the necessary structure without any specific commands or flows.
 
-    [INPUTS]
-        REQUIRED <APPLY_CONSTRAINTS> FontPreInstallation </APPLY_CONSTRAINTS> <REF> var_or_file </REF>
-        OPTIONAL <REF> var_or_file </REF>
-    [END_INPUTS]
-
-    [OUTPUTS]
-        REQUIRED <APPLY_CONSTRAINTS> FontPreInstallation </APPLY_CONSTRAINTS> <REF> var_or_file </REF>
-    [END_OUTPUTS]
-
-    [MAIN_FLOW]
-        [SEQUENTIAL_BLOCK]
-        [END_SEQUENTIAL_BLOCK]
-    [END_MAIN_FLOW]
-
+```plaintext
+[DEFINE_WORKER: "STATIC_DESCRIPTION" WorkerName]
+[INPUTS]
+[END_INPUTS]
+[OUTPUTS]
+[END_OUTPUTS]
+[MAIN_FLOW]
+[END_MAIN_FLOW]
 [EXAMPLES]
-    [NOTE: The original examples do not map cleanly to the WORKER because the WORKER lacks specific commands or decision points to process font names or sizes. The WORKER structure is incomplete and does not provide a clear path for handling the examples provided in the skill documentation.]
+    [NOTE: The original examples from the skill documentation do not map to any specific commands or decision points in the WORKER SPL text, as the WORKER SPL is minimal and lacks any defined commands or flows.]
 [END_EXAMPLES]
 [END_WORKER]

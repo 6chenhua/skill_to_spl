@@ -132,90 +132,6 @@ class SectionBundle:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Step 2A — Clause Extraction + Scoring (LLM output)
-# ─────────────────────────────────────────────────────────────────────────────
-
-@dataclass
-class RawScores:
-    """Six rubric dimensions scored by the LLM (0–3 each)."""
-    O: int  # Observability
-    A: int  # Actionability
-    F: int  # Formalizability
-    C: int  # Context dependence
-    R: int  # Risk / Safety criticality
-    V: int  # Verifiability
-
-    def validate(self) -> None:
-        for dim, val in [("O", self.O), ("A", self.A), ("F", self.F),
-                         ("C", self.C), ("R", self.R), ("V", self.V)]:
-            if not (0 <= val <= 3):
-                raise ValueError(f"Score {dim}={val} out of range [0,3]")
-
-
-@dataclass
-class RawClause:
-    """
-    A single normative clause as output by Step 2A LLM.
-    May be a parent (split=True) or leaf clause.
-
-    clause_type drives SPL routing in Step 4:
-      "rule" → DEFINE_CONSTRAINTS
-               Hard/Medium: with LOG; Hard violation → EXCEPTION_FLOW;
-               Medium not met → ALTERNATIVE_FLOW;
-               Soft: [SOFT] prefix; Non-Compilable: [GUIDELINE] prefix.
-               Hard + Medium rules also drive APPLY_CONSTRAINTS on WORKER INPUTS/OUTPUTS.
-      "step" → WORKER MAIN_FLOW COMMAND variant determined by execution_mode
-               in the corresponding WorkflowStepSpec.
-    """
-    clause_id: str
-    source_section: str
-    source_file: str
-    original_text: str
-    is_normative: bool
-    clause_type: str                   # "rule" | "step" | "prerequisite" | "guidance"
-    split: bool
-    sub_clauses: list[RawClause]       # non-empty only when split=True
-    scores: RawScores
-    score_rationale: str
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Step 2B — Classification (pure code)
-# ─────────────────────────────────────────────────────────────────────────────
-
-class Classification(str, Enum):
-    HARD   = "COMPILABLE_HARD"
-    MEDIUM = "COMPILABLE_MEDIUM"
-    SOFT   = "COMPILABLE_SOFT"
-    NON    = "NON_COMPILABLE"
-
-
-@dataclass
-class ClassifiedClause:
-    """
-    Output of Step 2B. A RawClause enriched with deterministic classification.
-
-    clause_type is propagated from RawClause and is the primary routing key for Step 4.
-    downgraded=True means the clause was originally HARD but was downgraded to MEDIUM
-    because the runtime capability profile does not support the required effects.
-    """
-    clause_id: str
-    original_text: str
-    source_section: str
-    source_file: str
-    scores: RawScores
-    S_det: int  # min(O, F, V) — deterministic checkability
-    S_proc: int  # min(A, V)    — process executability
-    classification: Classification
-    clause_type: str  # propagated from RawClause
-    risk_override: bool  # True if R==3 forced upgrade from SOFT→MEDIUM
-    downgraded: bool  # True if capability profile forced HARD→MEDIUM
-    confidence: float  # [0.0, 1.0] enforceability confidence
-    needs_review: bool
-    score_rationale: str
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Step 3 — Structured Entity and Step Extraction (LLM output)
 #
 # Design notes:
@@ -421,8 +337,6 @@ class StructuredSpec:
       alternative_flows                              → S4E  [ALTERNATIVE_FLOW: ...] blocks
       exception_flows                                → S4E  [EXCEPTION_FLOW: ...] blocks
 
-    ClassifiedClauses (clause_type="rule", passed separately):
-      → S4B  DEFINE_CONSTRAINTS
     """
     entities: list[EntitySpec]
     workflow_steps: list[WorkflowStepSpec]
@@ -460,13 +374,8 @@ class PipelineResult:
     file_role_map: dict[str, Any]
     package: SkillPackage
     section_bundle: SectionBundle
-    raw_clauses: list[RawClause]
-    classified_clauses: list[ClassifiedClause]
     structured_spec: StructuredSpec
 
     # final output
     spl_spec: SPLSpec
 
-    # diagnostics
-    needs_review_count: int = 0
-    low_confidence_count: int = 0

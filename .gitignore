@@ -3,3 +3,4 @@
 .kiro/
 .vscode/
 __pycache__/
+output/
