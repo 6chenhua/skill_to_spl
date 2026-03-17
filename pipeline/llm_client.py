@@ -207,10 +207,10 @@ class LLMClient:
         return _extract_json(raw, step_name)
 
 
-# ─── JSON extraction ─────────────────────────────────────────────────────────
-
+# ─── 增强版 JSON extraction ─────────────────────────────────────────────────────────
 def _extract_json(raw: str, step_name: str = ""):
     text = raw.strip()
+    step_tag = f"[{step_name}]" if step_name else ""
 
     # 1 direct
     try:
@@ -233,10 +233,10 @@ def _extract_json(raw: str, step_name: str = ""):
         except json.JSONDecodeError:
             continue
 
-    raise LLMParseError(
-        f"[{step_name}] Could not extract valid JSON",
-        raw_response=raw,
-    )
+    # ==================== 增强逻辑：失败记录日志 + 返回空 JSON ====================
+    error_msg = f"{step_tag} 未提取到有效JSON结构 | 原始文本：{repr(raw)}"
+    logger.error(error_msg)  # 记录错误日志
+    return {}  # 返回空 JSON 对象（如需返回空数组改为 return []）
 
 
 def _scan_json_candidates(text: str):

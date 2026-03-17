@@ -3,24 +3,30 @@
 
 
 [DEFINE_PERSONA:]
-ROLE: Applies Anthropic's official brand colors and typography to any sort of artifact that may benefit from having Anthropic's look-and-feel.
-DOMAIN: branding
-EXPERTISE: corporate identity
+    ROLE: Applies Anthropic's official brand colors and typography to any sort of artifact that may benefit from having Anthropic's look-and-feel.
+    DOMAIN: branding
 [END_PERSONA]
 
 [DEFINE_CONSTRAINTS:]
-    Fonts: Fonts should be pre-installed in your environment for best results (SKILL.md)
+    Fonts should be pre-installed in your environment for best results (SKILL.md)
 [END_CONSTRAINTS]
 
 [DEFINE_VARIABLES:]
+""" Assumed: Configuration constant for the system """
+READONLY system_mode: text = "production"
+""" Assumed: User preferences """
+user_preferences: { theme: text, notifications: boolean }
 [END_VARIABLES]
 
 [DEFINE_FILES:]
+""" Assumed: Log file for system events """
+LOG system_log < >: text
+""" Assumed: User uploaded images """
+user_images < >: image
+""" Assumed: Audio files for notifications """
+notification_sounds < >: audio
 [END_FILES]
 
-There are no workflow steps, alternative flows, or exception flows provided. Therefore, the [DEFINE_WORKER:] block will be minimal, containing only the necessary structure without any specific commands or flows.
-
-```plaintext
 [DEFINE_WORKER: "STATIC_DESCRIPTION" WorkerName]
 [INPUTS]
 [END_INPUTS]
@@ -28,7 +34,4 @@ There are no workflow steps, alternative flows, or exception flows provided. The
 [END_OUTPUTS]
 [MAIN_FLOW]
 [END_MAIN_FLOW]
-[EXAMPLES]
-    [NOTE: The original examples from the skill documentation do not map to any specific commands or decision points in the WORKER SPL text, as the WORKER SPL is minimal and lacks any defined commands or flows.]
-[END_EXAMPLES]
 [END_WORKER]

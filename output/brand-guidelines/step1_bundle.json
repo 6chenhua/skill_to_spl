@@ -1,12 +1,7 @@
 {
   "intent": [
     {
-      "text": "Applies Anthropic's official brand colors and typography to any sort of artifact that may benefit from having Anthropic's look-and-feel.",
-      "source": "SKILL.md",
-      "multi": false
-    },
-    {
-      "text": "Use it when brand colors or style guidelines, visual formatting, or company design standards apply.",
+      "text": "Applies Anthropic's official brand colors and typography to any sort of artifact that may benefit from having Anthropic's look-and-feel. Use it when brand colors or style guidelines, visual formatting, or company design standards apply.",
       "source": "SKILL.md",
       "multi": false
     },
@@ -26,7 +21,7 @@
   ],
   "tools": [
     {
-      "text": "Applied via python-pptx's RGBColor class",
+      "text": "python-pptx's RGBColor class",
       "source": "SKILL.md",
       "multi": false
     }
@@ -69,18 +64,7 @@
     }
   ],
   "evidence": [],
-  "examples": [
-    {
-      "text": "Headings (24pt+): Poppins font",
-      "source": "SKILL.md",
-      "multi": false
-    },
-    {
-      "text": "Body text: Lora font",
-      "source": "SKILL.md",
-      "multi": false
-    }
-  ],
+  "examples": [],
   "notes": [
     {
       "text": "Keywords: branding, corporate identity, visual identity, post-processing, styling, brand colors, typography, Anthropic brand, visual formatting, visual design",
@@ -88,17 +72,27 @@
       "multi": false
     },
     {
-      "text": "Preserves readability across all systems",
+      "text": "Uses system-installed Poppins and Lora fonts when available",
       "source": "SKILL.md",
       "multi": false
     },
     {
-      "text": "Preserves text hierarchy and formatting",
+      "text": "Provides automatic fallback to Arial (headings) and Georgia (body)",
       "source": "SKILL.md",
       "multi": false
     },
     {
-      "text": "Maintains visual interest while staying on-brand",
+      "text": "No font installation required - works with existing system fonts",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "For best results, pre-install Poppins and Lora fonts in your environment",
+      "source": "SKILL.md",
+      "multi": false
+    },
+    {
+      "text": "Uses RGB color values for precise brand matching",
       "source": "SKILL.md",
       "multi": false
     },
