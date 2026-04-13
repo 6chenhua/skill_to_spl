@@ -19,11 +19,42 @@ from typing import Any, Optional
 @dataclass
 class FileNode:
     """Represents a single file in the skill package."""
-    path: str                    # relative to skill root
-    kind: str                    # "doc" | "script" | "data" | "document" | "image" | "audio"
+    path: str  # relative to skill root
+    kind: str  # "doc" | "script" | "data" | "document" | "image" | "audio"
     size_bytes: int
-    head_lines: list[str]        # first 20 lines (doc) or head comment (script ≤5 lines)
-    references: list[str]        # other filenames mentioned in this file (regex scan)
+    head_lines: list[str]  # first 20 lines (doc) or head comment (script ≤5 lines)
+    references: list[str]  # other filenames mentioned in this file (regex scan)
+
+
+@dataclass
+class ScriptSpec:
+    """
+    Extracted metadata for a script file, representing an API/tool that can be called.
+
+    Used in DEFINE_APIS block when the script is referenced in workflow steps.
+    """
+    name: str # script filename (e.g., "fill_fillable_fields.py")
+    path: str # relative path from skill root (e.g., "scripts/fill_fillable_fields.py")
+    input_schema: dict[str, str] # param_name → type annotation
+    output_schema: str # return type annotation or "void"
+    description: str # one-line summary from docstring or first comment
+    main_function: str # primary callable name (e.g., "fill_pdf_fields")
+
+
+@dataclass
+class ToolSpec:
+    """
+    Unified API specification for DEFINE_APIS generation.
+    Covers scripts, code snippets, and external network APIs.
+    """
+    name: str # API name (for tool_hint reference)
+    api_type: str # "SCRIPT" | "CODE_SNIPPET" | "NETWORK_API"
+    url: str # scripts/<filename>.py | <library>.Class | https://...
+    authentication: str # "none" | "apikey" | "oauth"
+    input_schema: dict[str, str] # parameter name → type
+    output_schema: str # return type or "void"
+    description: str # short functional description
+    source_text: str # original source code/text for context
 
 
 @dataclass
@@ -33,8 +64,9 @@ class FileReferenceGraph:
     root_path: str
     skill_md_content: str        # full text of SKILL.md (anchor for P2)
     frontmatter: dict[str, Any]  # parsed YAML frontmatter from SKILL.md
-    nodes: dict[str, FileNode]   # rel_path → FileNode
+    nodes: dict[str, FileNode]  # rel_path → FileNode
     edges: dict[str, list[str]]  # referencing_file → [referenced_files]
+    docs_content: dict[str, str] = field(default_factory=dict)  # rel_path → full content for all .md files
 
     # ── CapabilityProfile Layer 1 (auto-derived by P1) ──────────────────────
     # These fields enable environment-aware classification in Step 2B.
@@ -72,8 +104,10 @@ class SkillPackage:
     skill_id: str
     root_path: str
     frontmatter: dict[str, Any]
-    merged_doc_text: str                # concatenated content with file boundary markers
-    file_role_map: dict[str, Any]       # path → FileRoleEntry dict (serializable)
+    merged_doc_text: str # concatenated content with file boundary markers
+    file_role_map: dict[str, Any] # path → FileRoleEntry dict (serializable)
+    scripts: list[ScriptSpec] = field(default_factory=list) # extracted script APIs (DEPRECATED: use tools)
+    tools: list[ToolSpec] = field(default_factory=list) # unified API specs for DEFINE_APIS
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -178,30 +212,29 @@ class WorkflowStepSpec:
     """
     A single step in the skill workflow, rewritten into SPL-ready form.
 
-    execution_mode drives the GENERAL_COMMAND variant in MAIN_FLOW:
-      "PROMPT_TO_CODE" — step describes running a specific script/tool;
-                         tool_hint is non-empty and step involves code execution.
-                         Emits: [COMMAND PROMPT_TO_CODE description RESULT var: type]
-      "CODE"           — source document contains a literal code block for this step.
-                         Emits: [COMMAND CODE description RESULT var: type]
-      "LLM_PROMPT"     — step is a reasoning/judgment task for the LLM.
-                         Emits: [COMMAND description RESULT var: type]
+    action_type drives the GENERAL_COMMAND variant in MAIN_FLOW:
+    "EXTERNAL_API" — step calls an external API/service.
+        Emits: [CALL ApiName ...] in MAIN_FLOW + DEFINE_APIS (via S4D).
+    "LLM_TASK" — step is a reasoning/judgment task for the LLM (default).
+        Emits: [COMMAND description RESULT var: type]
+    "EXEC_SCRIPT" — step runs a script or tool.
+        Emits: [COMMAND PROMPT_TO_CODE description RESULT var: type]
+    "FILE_READ" — step reads from a file.
+    "FILE_WRITE" — step writes to a file.
+    "USER_INTERACTION" — step requires user input.
+    "LOCAL_CODE_SNIPPET" — source contains a literal code block to execute.
 
-    "NETWORK" in effects  → [CALL ApiName ...] in MAIN_FLOW + DEFINE_APIS (via S4D).
     is_validation_gate=True → step checks an evidence requirement; failure triggers
-                              EXCEPTION_FLOW (step_id_failed) in the WORKER.
-    "EXEC" or "WRITE" in effects, with provenance_required produces → failure triggers
-                              EXCEPTION_FLOW as well.
+    EXCEPTION_FLOW (step_id_failed) in the WORKER.
     """
-    step_id: str  # step.<action_name>  (snake_case)
+    step_id: str  # step.<action_name> (snake_case)
     description: str  # SPL-ready COMMAND description
     prerequisites: list[str]  # entity_ids that must exist before this step
     produces: list[str]  # entity_ids this step creates
     is_validation_gate: bool  # True if derived from EVIDENCE requirements
-    effects: list[str]  # READ | WRITE | NETWORK | EXEC | REMOTE_RUN
-    execution_mode: str  # PROMPT_TO_CODE | CODE | LLM_PROMPT | USER_INPUT
-    tool_hint: str  # explicit tool/script name if stated, else ""
-    source_text: str  # verbatim anchor in source
+    action_type: str = "LLM_TASK"  # EXTERNAL_API | LLM_TASK | EXEC_SCRIPT | FILE_READ | FILE_WRITE | USER_INTERACTION | LOCAL_CODE_SNIPPET
+    tool_hint: str = ""  # explicit tool/script name if stated, else ""
+    source_text: str = ""  # verbatim anchor in source
 
 
 @dataclass
@@ -212,16 +245,19 @@ class FlowStep:
     Self-contained: no entity dependency tracking (prerequisites/produces)
     since alt/exc steps do not produce entities visible outside their block.
 
-    execution_mode values:
-      "PROMPT_TO_CODE"  step involves running/generating code or a script
-      "CODE"            source contains a literal code block to execute verbatim
-      "LLM_PROMPT"      reasoning or judgment task for the LLM (default)
-      "USER_INPUT"      step requires input from the user before proceeding
+    action_type values:
+    "EXTERNAL_API" — step calls an external API/service.
+    "LLM_TASK" — reasoning or judgment task for the LLM (default).
+    "EXEC_SCRIPT" — step involves running/generating code or a script.
+    "FILE_READ" — step reads from a file.
+    "FILE_WRITE" — step writes to a file.
+    "USER_INTERACTION" — step requires input from the user before proceeding.
+    "LOCAL_CODE_SNIPPET" — source contains a literal code block to execute verbatim.
     """
-    description: str  # concise action description (abstract action verb)
-    execution_mode: str  # PROMPT_TO_CODE | CODE | LLM_PROMPT | USER_INPUT
-    tool_hint: str  # explicit tool / API name if stated, else ""
-    source_text: str  # verbatim anchor in skill document
+    description: str = ""  # concise action description (abstract action verb)
+    action_type: str = "LLM_TASK"  # EXTERNAL_API | LLM_TASK | EXEC_SCRIPT | FILE_READ | FILE_WRITE | USER_INTERACTION | LOCAL_CODE_SNIPPET
+    tool_hint: str = ""  # explicit tool / API name if stated, else ""
+    source_text: str = ""  # verbatim anchor in skill document
 
 
 @dataclass

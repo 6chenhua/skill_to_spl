@@ -13,6 +13,7 @@ without touching pipeline code.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -21,8 +22,9 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 try:
-    from openai import OpenAI
-except ImportError as _anthropic_import_error:  # noqa: F841
+    from openai import AsyncOpenAI, OpenAI
+    import httpx
+except ImportError as _anthropic_import_error: # noqa: F841
     raise ImportError(
         "The 'openai' package is required. Install it with: pip install openai"
     )
@@ -109,16 +111,70 @@ class LLMClient:
     """
 
     def __init__(
-            self,
-            config: Optional[LLMConfig] = None,
-            session_usage: Optional[SessionUsage] = None,
+        self,
+        config: Optional[LLMConfig] = None,
+        session_usage: Optional[SessionUsage] = None,
     ):
         self.config = config or LLMConfig()
         self.session_usage = session_usage or SessionUsage()
+        self._closed = False  # Track if already closed
+        # Create httpx client that bypasses proxy to avoid SSL issues
+        self._http_client = httpx.Client(proxy=None)
         self._client = OpenAI(
-            base_url=config.base_url,
-            api_key=config.api_key
+            base_url=self.config.base_url,
+            api_key=self.config.api_key,
+            http_client=self._http_client
         )
+        # Create async client for parallel calls
+        self._async_http_client = httpx.AsyncClient(proxy=None)
+        self._async_client = AsyncOpenAI(
+            base_url=self.config.base_url,
+            api_key=self.config.api_key,
+            http_client=self._async_http_client
+        )
+
+    def close(self) -> None:
+        """Close HTTP clients to prevent Windows asyncio cleanup warnings."""
+        if self._closed:
+            return
+        self._closed = True
+
+        # Close sync client
+        try:
+            self._http_client.close()
+        except Exception:
+            pass
+
+        # Close async client - must be done carefully on Windows
+        try:
+            import asyncio
+            # Try to get a running loop
+            try:
+                loop = asyncio.get_running_loop()
+                if loop.is_running():
+                    # We're inside an async context, schedule cleanup
+                    loop.call_soon_threadsafe(
+                        lambda: asyncio.create_task(self._async_http_client.aclose())
+                    )
+                else:
+                    # Loop exists but not running, run the close coroutine
+                    loop.run_until_complete(self._async_http_client.aclose())
+            except RuntimeError:
+                # No running loop, need to create one
+                try:
+                    asyncio.run(self._async_http_client.aclose())
+                except RuntimeError:
+                    # Event loop is closed, suppress the error
+                    pass
+        except Exception:
+            pass
+
+    def __del__(self) -> None:
+        """Cleanup on garbage collection - suppress all errors on Windows."""
+        try:
+            self.close()
+        except Exception:
+            pass
 
     # ── Raw call ─────────────────────────────────────────────────────────────
 
@@ -187,56 +243,136 @@ class LLMClient:
     # ── JSON call ────────────────────────────────────────────────────────────
 
     def call_json(
-            self,
-            step_name: str,
-            system: str,
-            user: str,
+        self,
+        step_name: str,
+        system: str,
+        user: str,
     ) -> Any:
         """
         Call the LLM and parse the response as JSON.
 
         Handles three common LLM response formats:
-          1. Bare JSON object/array
-          2. ```json ... ``` fenced code block
-          3. JSON embedded anywhere in prose (last-resort extraction)
+        1. Bare JSON object/array
+        2. ```json ... ``` fenced code block
+        3. JSON embedded anywhere in prose (last-resort extraction)
 
         Raises:
-            LLMParseError: if no valid JSON can be extracted.
+        LLMParseError: if no valid JSON can be extracted.
         """
         raw = self.call(step_name=step_name, system=system, user=user)
-        return _extract_json(raw, step_name)
+        return self._extract_json(raw, step_name)
 
 
-# ─── 增强版 JSON extraction ─────────────────────────────────────────────────────────
-def _extract_json(raw: str, step_name: str = ""):
-    text = raw.strip()
-    step_tag = f"[{step_name}]" if step_name else ""
+    # ── Async call ────────────────────────────────────────────────────────────
 
-    # 1 direct
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
+    async def async_call(
+        self,
+        step_name: str,
+        system: str,
+        user: str,
+    ) -> str:
+        """
+        Async version of call(). Send a single-turn system + user prompt.
+        Returns the full response text. Retries on transient errors.
+        """
+        delay = self.config.retry_base_delay
+        last_exc: Optional[Exception] = None
 
-    # 2 fenced block
-    fence = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text, re.I)
-    if fence:
+        for attempt in range(1, self.config.max_retries + 1):
+            try:
+                logger.debug("[%s] async attempt %d/%d", step_name, attempt, self.config.max_retries)
+                response = await self._async_client.chat.completions.create(
+                    model=self.config.model,
+                    max_tokens=self.config.max_tokens,
+                    temperature=self.config.temperature,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user}
+                    ],
+                )
+                usage = TokenUsage(
+                    input_tokens=response.usage.prompt_tokens if response.usage else 0,
+                    output_tokens=response.usage.completion_tokens if response.usage else 0,
+                )
+                self.session_usage.record(step_name, usage)
+                logger.debug(
+                    "[%s] async tokens: in=%d out=%d",
+                    step_name, usage.input_tokens, usage.output_tokens,
+                )
+                content = response.choices[0].message.content
+                if content is None:
+                    return ""
+                return content
+
+            except Exception as exc:
+                import openai
+                if openai and isinstance(exc, openai.RateLimitError):
+                    last_exc = exc
+                    logger.warning("[%s] async rate limit, retrying in %.1fs (attempt %d)", step_name, delay, attempt)
+                    await asyncio.sleep(delay)
+                    delay *= 2
+                elif openai and isinstance(exc, openai.APIStatusError) and exc.status_code >= 500:
+                    last_exc = exc
+                    logger.warning("[%s] async server error %d, retrying in %.1fs", step_name, exc.status_code, delay)
+                    await asyncio.sleep(delay)
+                    delay *= 2
+                elif openai and isinstance(exc, openai.APIStatusError):
+                    raise  # 4xx not retried
+                elif openai and isinstance(exc, openai.APIConnectionError):
+                    last_exc = exc
+                    logger.warning("[%s] async connection error, retrying in %.1fs", step_name, delay)
+                    await asyncio.sleep(delay)
+                    delay *= 2
+                else:
+                    raise
+
+        raise LLMRetryExhausted(
+            f"[{step_name}] async all {self.config.max_retries} attempts failed"
+        ) from last_exc
+
+    async def async_call_json(
+        self,
+        step_name: str,
+        system: str,
+        user: str,
+    ) -> Any:
+        """
+        Async version of call_json(). Call the LLM and parse the response as JSON.
+        """
+        raw = await self.async_call(step_name=step_name, system=system, user=user)
+        return self._extract_json(raw, step_name)
+
+
+    def _extract_json(self, raw: str, step_name: str = ""):
+        """Extract JSON from LLM response."""
+        text = raw.strip()
+        step_tag = f"[{step_name}]" if step_name else ""
+
+        # 1 direct
         try:
-            return json.loads(fence.group(1))
+            return json.loads(text)
         except json.JSONDecodeError:
             pass
 
-    # 3 bracket scan
-    for candidate in _scan_json_candidates(text):
-        try:
-            return json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
+        # 2 fenced block
+        fence = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text, re.I)
+        if fence:
+            try:
+                return json.loads(fence.group(1))
+            except json.JSONDecodeError:
+                pass
 
-    # ==================== 增强逻辑：失败记录日志 + 返回空 JSON ====================
-    error_msg = f"{step_tag} 未提取到有效JSON结构 | 原始文本：{repr(raw)}"
-    logger.error(error_msg)  # 记录错误日志
-    return {}  # 返回空 JSON 对象（如需返回空数组改为 return []）
+        # 3 bracket scan
+        for candidate in _scan_json_candidates(text):
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+
+        # ==================== 增强逻辑：失败记录日志 + 返回空 JSON ====================
+        error_msg = f"{step_tag} 未提取到有效JSON结构 | 原始文本：{repr(raw)}"
+        logger.error(error_msg) # 记录错误日志
+        return {} # 返回空 JSON 对象（如需返回空数组改为 return [])
 
 
 def _scan_json_candidates(text: str):

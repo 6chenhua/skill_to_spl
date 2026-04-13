@@ -82,6 +82,7 @@ def run_step3a_entity_extraction(
 def run_step3b_workflow_analysis(
     bundle: SectionBundle,
     entity_ids: list[str],
+    tools: list,  # list[ToolSpec] - available tools for reference
     client: LLMClient,
 ) -> StructuredSpec:
     """
@@ -89,15 +90,32 @@ def run_step3b_workflow_analysis(
 
     entity_ids from Step 3A constrain prerequisites/produces so the LLM
     cannot invent entity names.
+    
+    tools provides the list of available APIs (SCRIPT, CODE_SNIPPET, NETWORK_API)
+    for tool_hint matching.
 
     Steps requiring user input have execution_mode="USER_INPUT".
     Returns a StructuredSpec with entities=[] (filled by the caller).
     """
+    # Format available tools for the prompt
+    tools_info = []
+    for tool in tools:
+        tools_info.append({
+            "name": tool.name,
+            "api_type": tool.api_type,
+            "description": tool.description,
+            "input_schema": tool.input_schema,
+            "output_schema": tool.output_schema,
+        })
+    
+    available_tools_json = json.dumps(tools_info, indent=2, ensure_ascii=False)
+    
     user_prompt = templates.render_step3b_user(
         entity_ids_json=json.dumps(entity_ids, indent=2, ensure_ascii=False),
         workflow_section=bundle.to_text(["WORKFLOW"]),
         tools_section=bundle.to_text(["TOOLS"]),
         evidence_section=bundle.to_text(["EVIDENCE"]),
+        available_tools=available_tools_json,
     )
 
     raw = client.call_json(
@@ -109,7 +127,7 @@ def run_step3b_workflow_analysis(
     spec = _parse_step3b_result(raw)
     val_gates = sum(1 for s in spec.workflow_steps if s.is_validation_gate)
     user_inputs = sum(
-        1 for s in spec.workflow_steps if s.execution_mode == "USER_INPUT"
+        1 for s in spec.workflow_steps if s.action_type == "USER_INTERACTION"
     )
     logger.info(
         "[Step 3B] %d steps (%d validation gates, %d user-input), "
@@ -123,6 +141,7 @@ def run_step3b_workflow_analysis(
 def run_step3_structured_extraction(
     bundle: SectionBundle,
     client: LLMClient,
+    tools: list | None = None,
 ) -> StructuredSpec:
     """
     Combined Step 3A + 3B. This is the function the orchestrator calls.
@@ -133,6 +152,7 @@ def run_step3_structured_extraction(
     partial = run_step3b_workflow_analysis(
         bundle=bundle,
         entity_ids=[e.entity_id for e in entities],
+        tools=tools or [],
         client=client,
     )
 
@@ -177,6 +197,8 @@ def _parse_entities(items: list) -> list[EntitySpec]:
 
 
 def _parse_workflow_steps(items: list) -> list[WorkflowStepSpec]:
+    # NOTE: effects and execution_mode are DEPRECATED fields.
+    # They are explicitly ignored here even if LLM returns them.
     return [
         WorkflowStepSpec(
             step_id=item.get("step_id", ""),
@@ -184,8 +206,7 @@ def _parse_workflow_steps(items: list) -> list[WorkflowStepSpec]:
             prerequisites=item.get("prerequisites", []),
             produces=item.get("produces", []),
             is_validation_gate=bool(item.get("is_validation_gate", False)),
-            effects=item.get("effects", []),
-            execution_mode=item.get("execution_mode", "LLM_PROMPT"),
+            action_type=item.get("action_type", "LLM_TASK"),
             tool_hint=item.get("tool_hint", ""),
             source_text=item.get("source_text", ""),
         )
@@ -194,9 +215,11 @@ def _parse_workflow_steps(items: list) -> list[WorkflowStepSpec]:
 
 
 def _parse_flow_step(item: dict) -> FlowStep:
+    # NOTE: execution_mode is a DEPRECATED field.
+    # It is explicitly ignored here even if LLM returns it.
     return FlowStep(
         description=item.get("description", ""),
-        execution_mode=item.get("execution_mode", "LLM_PROMPT"),
+        action_type=item.get("action_type", "LLM_TASK"),
         tool_hint=item.get("tool_hint", ""),
         source_text=item.get("source_text", ""),
     )

@@ -190,11 +190,11 @@ def validate_file_role_map(output: dict) -> list[str]:
 class TestP2Input:
 
     def test_system_prompt_not_empty(self):
-        from templates import P2_SYSTEM
+        from prompts.templates import P2_SYSTEM
         assert len(P2_SYSTEM) > 100
 
     def test_rendered_user_contains_all_files(self):
-        from templates import render_p2_user
+        from prompts.templates import render_p2_user
         rendered = render_p2_user(
             skill_md_references=SKILL_MD_REFERENCE_SENTENCES,
             nodes_summary=NODES_SUMMARY,
@@ -204,7 +204,7 @@ class TestP2Input:
             assert path in rendered, f"File '{path}' missing from P2 USER prompt"
 
     def test_rendered_user_contains_reference_link_context(self):
-        from templates import render_p2_user
+        from prompts.templates import render_p2_user
         rendered = render_p2_user(
             skill_md_references=SKILL_MD_REFERENCE_SENTENCES,
             nodes_summary=NODES_SUMMARY,
@@ -221,7 +221,7 @@ class TestP2Input:
         assert "SKILL.md [" not in NODES_SUMMARY
 
     def test_rendered_user_contains_edges(self):
-        from templates import render_p2_user
+        from prompts.templates import render_p2_user
         rendered = render_p2_user(
             skill_md_references=SKILL_MD_REFERENCE_SENTENCES,
             nodes_summary=NODES_SUMMARY,
@@ -279,7 +279,7 @@ class TestP2ExpectedOutput:
 class TestP2LiveLLM:
 
     def _call(self, llm_client):
-        from templates import P2_SYSTEM, render_p2_user
+        from prompts.templates import P2_SYSTEM, render_p2_user
         user = render_p2_user(
             skill_md_references=SKILL_MD_REFERENCE_SENTENCES,
             nodes_summary=NODES_SUMMARY,

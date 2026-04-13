@@ -1,6 +1,6 @@
 SPL_AGENT := "[DEFINE_AGENT:" AGENT_NAME ["\"" STATIC_DESCRIPTION "\""] "]" SPL_PROMPT "[END_AGENT]"
 
-SPL_PROMPT := PERSONA [AUDIENCE] [CONCEPTS] [CONSTRAINTS] [VARIABLES] [FILES] [APIS] {INSTRUCTION}
+SPL_PROMPT := PERSONA [AUDIENCE] [CONCEPTS] [CONSTRAINTS] [VARIABLES] {INSTRUCTION}
 
 """PERSONA describes the primary role this agent plays and its key attributes for its functionality"""
 PERSONA := "[DEFINE_PERSONA:]" PERSONA_ASPECTS "[END_PERSONA]"
@@ -16,15 +16,6 @@ OPTIONAL_ASPECT := OPTIONAL_ASPECT_NAME ":" DESCRIPTION_WITH_REFERENCES
 OPTIONAL_ASPECT_NAME := <word> """Capitalize the word"""
 ASPECT_NAME := ROLE_ASPECT_NAME | OPTIONAL_ASPECT_NAME
 
-"""
-One constraint aspect may have one or more separate constraint descriptions such as
-Violence and Hate: "Should not help people plan or engage in violence."
-Violence and Hate: "Should not encourage people to engage in violence."
-Violence and Hate: "Express hateful, derogatory, or demeaning sentiments against people based on ..."
-Violence and Hate: "Encourage discrimination against people based on those characteristics and should not use slurs or  ..."
-
-Constraints do not have explicit INPUTS. So need to infer the involved arguments from the applicaiton context.
-"""
 """CONSTRAINTS highlight the limitations and requirements the agent must operate within to be effective and compliant"""
 CONSTRAINTS := "[DEFINE_CONSTRAINTS:]" {CONSTRAINT} "[END_CONSTRAINTS]"
 CONSTRAINT := [OPTIONAL_ASPECT_NAME ":"]  DESCRIPTION_WITH_REFERENCES
@@ -48,23 +39,6 @@ VARIABLE_DECLARATION := ["\"" DESCRIPTION_WITH_REFERENCES "\""] ["READONLY"] VAR
 VAR_NAME := <word>
 DEFAULT_VALUE := VALUE
 
-"""<filepath> is relative to agent root"""
-"""if no DATA_TYPE provided for LEAF_FILE_DECLARATION, treat the file content as text, image or audio based on the file type"""
-"""Whether a LEAF_FILE_DECLARATION is a structured or unstructured file will be defined by DATA_TYPE"""
-"""DATA_TYPE is compulsory for DATABASE_DECLARATION"""
-FILES := "[DEFINE_FILES:]" {FILE_DECLARATION} "[END_FILES]"
-FILE_DECLARATION := FOLDER_DECLARATION | LEAF_FILE_DECLARATION
-
-"""
-File DATA_TYPE should be directly inferred from the file metadata or content.
-UGAiForge allows agent developer to edit the inferred DATA_TYPE.
-"""
-
-FOLDER_DECLARATION := ["\"" STATIC_DESCRIPTION "\""] FILE_NAME FILE_PATH "List [" {FOLDER_DECLARATION | LEAF_FILE_DECLARATION} "]"
-LEAF_FILE_DECLARATION := ["\"" STATIC_DESCRIPTION "\""] [APPLY_GUARDRAILS BEFORE_OR_AFTER_OPERATION] ["LOG" <file-exceptions>] [REFERENCE_VECTOR_STORE] FILE_NAME FILE_PATH ":" DATA_TYPE
-FILE_NAME := <word>
-FILE_PATH := <filepath> | "< >" """< > means this file is not specified at compile time so this file has to be uploaded at runtime."""
-
 """UGAiForge supports the definition of STRUCTURED_DATA_TYPE and ENUM_TYPE as NAMED TYPE"""
 TYPES := "[DEFINE_TYPES:]" {ENUM_TYPE_DECLARATION | STRUCTURED_DATA_TYPE_DECLARATION} "[END_TYPES]"
 ENUM_TYPE_DECLARATION := ["\"" STATIC_DESCRIPTION "\""] DECLARED_TYPE_NAME "=" ENUM_TYPE
@@ -81,32 +55,6 @@ STRUCTURED_DATA_TYPE := "{" STRUCTURED_TYPE_BODY "}" ｜ "{ }"
 STRUCTURED_TYPE_BODY := TYPE_ELEMENT | TYPE_ELEMENT "," STRUCTURED_TYPE_BODY
 TYPE_ELEMENT := ["\"" STATIC_DESCRIPTION "\""] [APPLY_GUARDRAILS BEFORE_OR_AFTER_OPERATION] [APPLY_CONSTRAINTS BEFORE_OR_AFTER_OPERATION] [REFERENCE_VECTOR_STORE] ["OPTIONAL"] ELEMENT_NAME ":" DATA_TYPE
 ELEMENT_NAME := <word>
-
-APIS := "[DEFINE_APIS:]" {API_DECLARATION} "[END_APIS]"
-API_DECLARATION := ["\"" STATIC_DESCRIPTION "\""] API_NAME "<" AUTHENTICATION ">" ["RETRY" <number>] ["LOG" <api-exceptions>] OPENAPI_SCHEMA API_IN_SPL
-AUTHENTICATION := <none> | <apikey> | <oauth>
-OPENAPI_SCHEMA := STRUCTURED_TEXT """OpenAPI schema expressed in STRUCTURED_TEXT"""
-
-API_IN_SPL := "{" FUNCTIONS "}"
-FUNCTIONS := "functions:" "[" {FUNCTION} "]"
-FUNCTION := "{" "name:" STATIC_DESCRIPTION "," URL ["," "description:" STATIC_DESCRIPTION] "," PARAMETERS "," RETURN }"
-PARAMETERS := "{" "parameters:" "[" {PARAMETER} "]" "," "controlled-input:" BOOL_VALUE "}"
-PARAMETER := "{" "required:" BOOL_VALUE "," "name:" STATIC_DESCRIPTION "," "type:" PARAMETER_TYPE ["," "guardrails:" "[" GUARDRAIL_NAME {"," GUARDRAIL_NAME} "]"] ["," "description:" STATIC_DESCRIPTION] "}"
-RETURN := "{" "type:" PARAMETER_TYPE "," "controlled-output:" BOOL_VALUE ["," "guardrails:" "[" GUARDRAIL_NAME {"," GUARDRAIL_NAME} "]"] ["," "description:" STATIC_DESCRIPTION] "}"
-BOOL_VALUE := "true" | "false"
-PARAMETER_TYPE := TYPE_NAME | "List [" TYPE_NAME "]"
-
-"""
-***SIGNIFICANT UPDATE:
-MAIN_FLOW, ALTERNATIVE_FLOW and EXCEPTION_FLOW can have any number of and any combination of SEQUENTIAL_BLOCK | IF_BLOCK | LOOP_BLOCK
-***
-
-Guardrails apply to the referenced input and output.
-
-Examples and scenarios semantic compliance:
--) EXAMPLES structured text must be consistent with worker input and output declarations and cover one feasible execution path. ???Use Zod or Pydantic or Promptfoo to validate.
--) SCENARIOS structured text must follow Gherkin syntax and be consistent with worker input/flow/output declaration. ???Use Zod or Pydantic or Promptfoo to validate"""
-"""
 
 INSTRUCTION := WORKER_INSTRUCTION
 WORKER_INSTRUCTION := "[DEFINE_WORKER:" ["\"" STATIC_DESCRIPTION "\""] WORKER_NAME "]" [INPUTS] [OUTPUTS] MAIN_FLOW {ALTERNATIVE_FLOW} {EXCEPTION_FLOW} [EXAMPLES]"" "[END_WORKER]"
@@ -175,12 +123,15 @@ More SYSTEM_COMMAND for text, image, file, math, time operations.
 
 COMMAND := COMMAND_INDEX COMMAND_BODY
 COMMAND_INDEX := "COMMAND-" <number> """System maintained unique command index"""
-COMMAND_BODY := GENERAL_COMMAND | CALL_API | REQUEST_INPUT | DISPLAY_MESSAGE
+COMMAND_BODY := GENERAL_COMMAND |  INVOKE_INSTRUCTION  | REQUEST_INPUT | DISPLAY_MESSAGE
 """If a command is not prompt-to-code or code, the command is a regular prompt."""
-GENERAL_COMMAND := "[COMMAND" ["CODE"] DESCRIPTION_WITH_REFERENCES ["STOP" DESCRIPTION_WITH_REFERENCES] ["RESULT" COMMAND_RESULT ["SET" | "APPEND"]] "]" """SET is default operation"""
+GENERAL_COMMAND := "[COMMAND" ["PROMPT_TO_CODE" | "CODE"] DESCRIPTION_WITH_REFERENCES ["STOP" DESCRIPTION_WITH_REFERENCES] ["RESULT" COMMAND_RESULT ["SET" | "APPEND"]] "]" """SET is default operation"""
 DISPLAY_MESSAGE := "[DISPLAY" DESCRIPTION_WITH_REFERENCES "]"
 REQUEST_INPUT := "[INPUT" ["DISPLAY"] DESCRIPTION_WITH_REFERENCE "VALUE" COMMAND_RESULT ["SET" | "APPEND"] [APPLY_GUARDRAILS] "]" """With DISPLAY, DESCRIPTION_WITH_REFERENCE is regarded as display text. Otherwise, DESCRIPTION_WITH_REFERENCE is a prompt."""
-CALL_API := "[CALL" API_NAME {"," API_NAME} ["WITH" ARGUMENT_LIST {"," ARGUMENT_LIST}] ["RESPONSE" COMMAND_RESULT ["SET" | "APPEND"]] [APPLY_GUARDRAILS] "]" ""Guardrails also apply to API parameters and return definition in API_IN_SPL""""
+INVOKE_INSTRUCTION := "[INVOKE" INSTRUCTION_NAME {"," INSTRUCTION_NAME} ["WITH" ARGUMENT_LIST {"," ARGUMENT_LIST}] ["RESPONSE" COMMAND_RESULT ["SET" | "APPEND"]]  "]"
+INSTRUCTION_NAME := WORKER_NAME 
+ARGUMENT_LIST := STRUCTURED_TEXT
+
 COMMAND_RESULT := VAR_NAME ":" DATA_TYPE | REFERENCE """VAR_NAME ":" DATA_TYPE essentially declares a temporary variable"""
 
 DESCRIPTION_WITH_REFERENCES := STATIC_DESCRIPTION {DESCRIPTION_WITH_REFERENCES} | REFERENCE {DESCRIPTION_WITH_REFERENCES}

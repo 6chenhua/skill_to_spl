@@ -1,85 +1,63 @@
 """
-P3 — Skill Package Assembler (pure code, with optional LLM fallback).
+P3 — Skill Package Assembler (merged with P2.5 API analysis, async version).
 
 Responsibilities:
 - Consume FileReferenceGraph + FileRoleMap (P2 output)
-- Read full content for priority-1 files; head lines for priority-2 files
-- Skip priority-3 files entirely
-- Concatenate into a single merged_doc_text with clear file boundary markers
+- Priority 1 (doc files): Read full content + extract code snippets (async parallel)
+- Priority 2 (script files): Analyze with AST + LLM to generate ToolSpec (async parallel)
+- Priority 3 (data/asset): Skip entirely
+- Concatenate into merged_doc_text with clear file boundary markers
 - Output: SkillPackage (ready for Step 1 LLM input)
 
-LLM fallback (priority-2 only):
-  If a priority-2 file has no extractable head content (empty head_lines), P3
-  reads up to _FALLBACK_READ_CHARS of the file and calls `summarize_fn` to
-  produce a 2-3 sentence summary.  This prevents silent "(no head comment)"
-  placeholders from reaching Step 1.
-  If no `summarize_fn` is provided, P3 falls back to the first 20 lines of the
-  raw file content instead (better than nothing, still no LLM required).
+Merged P2.5 functionality:
+- Code snippet extraction from doc files (priority=1 branch, parallel)
+- Script API analysis (priority=2 branch, parallel)
 """
-
 from __future__ import annotations
 
+import asyncio
+import ast
 import logging
+import re
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
-from models.data_models import FileReferenceGraph, SkillPackage
+from models.data_models import FileReferenceGraph, SkillPackage, ToolSpec
 
 logger = logging.getLogger(__name__)
 
-# Maximum characters read for LLM fallback summarization
-_FALLBACK_READ_CHARS = 4000
-
-
-# ─── Boundary markers ───────────────────────────────────────────────────────
 
 def _boundary(rel_path: str, role: str, priority_label: str) -> str:
+    """Generate a file boundary marker for merged_doc_text."""
     return f"=== FILE: {rel_path} | role: {role} | priority: {priority_label} ==="
 
 
-# ─── Summary helpers ─────────────────────────────────────────────────────────
-
-def _read_fallback_content(file_path: Path) -> str:
-    """Read up to _FALLBACK_READ_CHARS of a file for summarization."""
-    try:
-        raw = file_path.read_text(encoding="utf-8", errors="replace")
-        return raw[:_FALLBACK_READ_CHARS]
-    except Exception as exc:
-        return f"[ERROR: could not read file — {exc}]"
-
-
-def _head_is_empty(head_lines: list[str]) -> bool:
-    """Return True if head_lines contain no meaningful content."""
-    if not head_lines:
-        return True
-    joined = " ".join(head_lines).strip()
-    return not joined or joined in {"(no head comment)", "(empty)"}
-
-
-# ─── Main entry point ───────────────────────────────────────────────────────
-
 def assemble_skill_package(
-        graph: FileReferenceGraph,
-        file_role_map: dict[str, Any],
-        summarize_fn: Optional[Callable[[str, str], str]] = None,
+    graph: FileReferenceGraph,
+    file_role_map: dict[str, Any],
+    client=None,  # LLM client for API analysis
 ) -> SkillPackage:
     """
-    P3: Assemble the merged document text for Step 1.
+    P3: Assemble the merged document text for Step 1, merging P2.5 analysis.
 
-    Priority semantics:
-        1 = must_read       → include full file content
-        2 = include_summary → include head_lines (with LLM fallback if empty)
-        3 = omit            → skip entirely
+    This is a synchronous wrapper around the async implementation.
+    All LLM calls are executed in parallel for better performance.
 
-    Args:
-        graph:         Output of P1.
-        file_role_map: Output of P2 (dict of path → {role, read_priority, ...}).
-        summarize_fn:  Optional callable(rel_path, file_content) → summary_str.
-                       Called only when a priority-2 file has empty head_lines.
-                       If None, falls back to raw first-20-lines instead.
+    Priority semantics (new):
+    1 = doc files -> read full content + extract code snippets (P2.5, parallel)
+    2 = script files -> analyze with AST + LLM, generate ToolSpec (P2.5, parallel)
+    3 = data/asset -> skip entirely
+    """
+    return asyncio.run(_assemble_skill_package_async(graph, file_role_map, client))
 
-    Returns:
-        SkillPackage ready to be fed into Step 1.
+
+async def _assemble_skill_package_async(
+    graph: FileReferenceGraph,
+    file_role_map: dict[str, Any],
+    client=None,
+) -> SkillPackage:
+    """
+    Async implementation: All LLM calls are executed in parallel.
     """
     root = Path(graph.root_path)
     sections: list[str] = []
@@ -89,6 +67,10 @@ def assemble_skill_package(
         file_role_map.items(),
         key=lambda kv: (kv[1].get("read_priority", 3), kv[0]),
     )
+
+    # Separate tasks by priority
+    priority1_tasks: list[tuple[str, str, Path, Any]] = []  # (rel_path, role, file_path, node)
+    priority2_tasks: list[tuple[str, str, Path, Any]] = []  # (rel_path, role, file_path, node)
 
     for rel_path, role_entry in ordered:
         priority: int = role_entry.get("read_priority", 3)
@@ -103,25 +85,97 @@ def assemble_skill_package(
         file_path = root / rel_path
 
         if priority == 1:
-            # Full content — no summarization needed
-            try:
-                content = file_path.read_text(encoding="utf-8", errors="replace")
-            except Exception as exc:
-                content = f"[ERROR: could not read file — {exc}]"
-            header = _boundary(rel_path, role, "MUST_READ")
-            sections.append(f"{header}\n{content}")
-
+            priority1_tasks.append((rel_path, role, file_path, node))
         elif priority == 2:
-            summary, preamble = _get_priority2_summary(
-                node=node,
-                file_path=file_path,
-                rel_path=rel_path,
-                summarize_fn=summarize_fn,
-            )
-            header = _boundary(rel_path, role, "SUMMARY")
-            sections.append(f"{header}\n{preamble}\n{summary}")
+            priority2_tasks.append((rel_path, role, file_path, node))
+
+    # Process priority 1: Read all content first (I/O bound, fast)
+    doc_contents: dict[str, str] = {}
+    for rel_path, role, file_path, node in priority1_tasks:
+        content = _read_file_content(file_path)
+        header = _boundary(rel_path, role, "MUST_READ")
+        sections.append(f"{header}\n{content}")
+        doc_contents[rel_path] = content
+
+    # Phase 1: Launch all LLM tasks in parallel
+    llm_tasks = []
+
+    # Create tasks for code snippet extraction from docs
+    if client and priority1_tasks:
+        for rel_path, content in doc_contents.items():
+            task = _extract_snippets_from_doc_async(content, rel_path, client)
+            llm_tasks.append(("snippet", rel_path, task))
+
+    # Create tasks for script analysis
+    if client and priority2_tasks:
+        for rel_path, role, file_path, node in priority2_tasks:
+            task = _analyze_script_file_async(file_path, rel_path, node, client)
+            llm_tasks.append(("script", rel_path, task))
+
+    # Execute all LLM tasks in parallel
+    tools: list[ToolSpec] = []
+    script_results: dict[str, tuple[Optional[ToolSpec], str, str, Any]] = {}
+    results: list[Any] = []
+
+    if llm_tasks:
+        logger.info("[P3/P2.5] Launching %d parallel LLM tasks", len(llm_tasks))
+        results = await asyncio.gather(
+            *[task for _, _, task in llm_tasks],
+            return_exceptions=True,
+        )
+
+    # Process results
+    for i, (task_type, rel_path, _) in enumerate(llm_tasks):
+        result = results[i]
+        if isinstance(result, Exception):
+            logger.warning("[P3/P2.5] Task failed for %s: %s", rel_path, result)
+            if task_type == "script":
+                # Find the node for this script
+                for rp, role, fp, node in priority2_tasks:
+                    if rp == rel_path:
+                        script_results[rel_path] = (None, role, rel_path, node)
+                        break
+            continue
+
+        if task_type == "snippet":
+            # result is list[ToolSpec]
+            if isinstance(result, list):
+                snippet_tools = result
+                tools.extend(snippet_tools)
+                if snippet_tools:
+                    logger.info(
+                        "[P3/P2.5] Extracted %d code snippets from %s",
+                        len(snippet_tools),
+                        rel_path,
+                    )
+        elif task_type == "script":
+            # result is Optional[ToolSpec]
+            if isinstance(result, ToolSpec) or result is None:
+                tool = result
+                for rp, role, fp, node in priority2_tasks:
+                    if rp == rel_path:
+                        script_results[rel_path] = (tool, role, rel_path, node)
+                        break
+
+    # Process script results - only add to tools, NOT to merged_doc_text
+    # API specs are for Step 3B/4D, not for Step 1 structure extraction
+    for rel_path, (tool, role, _, node) in script_results.items():
+        if tool:
+            tools.append(tool)
+            # NOTE: We do NOT add script API specs to merged_doc_text
+            # merged_doc_text is for Step 1 structure extraction (doc content only)
+            # Script API specs are stored in package.tools for Step 3B/4D
+            logger.info("[P3/P2.5] Analyzed script: %s", rel_path)
+        else:
+            logger.warning("[P3/P2.5] Script analysis failed for %s", rel_path)
 
     merged_doc_text = "\n\n".join(sections)
+
+    logger.info(
+        "[P3] Assembled %d sections, %d tools (API specs + code snippets)",
+        len(sections),
+        len(tools),
+    )
 
     return SkillPackage(
         skill_id=graph.skill_id,
@@ -129,49 +183,278 @@ def assemble_skill_package(
         frontmatter=graph.frontmatter,
         merged_doc_text=merged_doc_text,
         file_role_map=file_role_map,
+        scripts=[],  # Deprecated: use tools instead
+        tools=tools,  # Unified API specs from P2.5
     )
 
 
-def _get_priority2_summary(
-        node: Any,
-        file_path: Path,
-        rel_path: str,
-        summarize_fn: Optional[Callable[[str, str], str]],
-) -> tuple[str, str]:
+def _read_file_content(file_path: Path) -> str:
+    """Read file content with error handling."""
+    try:
+        return file_path.read_text(encoding="utf-8", errors="replace")
+    except Exception as exc:
+        return f"[ERROR: could not read file — {exc}]"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Async P2.5 Functions
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def _extract_snippets_from_doc_async(
+    content: str, source_file: str, client
+) -> list[ToolSpec]:
     """
-    Determine the summary text and preamble label for a priority-2 file.
-
-    Strategy:
-      1. Use head_lines if they contain meaningful content  →  fast path, no I/O
-      2. head_lines are empty → read file content and either:
-         a. Call summarize_fn (LLM)  →  2-3 sentence summary
-         b. No summarize_fn          →  raw first 20 lines (graceful degradation)
+    Async version: Extract code snippets from a doc file's content.
+    All snippets are processed in parallel.
     """
-    if node.kind == "script":
-        preamble_full = "[Script summary — head comment only, no source code]"
-        preamble_llm = "[Script summary — LLM-generated from head content]"
-        preamble_raw = "[Script — no head comment; showing first 20 lines]"
-    else:
-        preamble_full = "[First 20 lines only]"
-        preamble_llm = "[LLM-generated summary — head content was empty]"
-        preamble_raw = "[First 20 lines (head was empty)]"
+    tools = []
+    pattern = r'```(\w+)?\n(.*?)```'
+    matches = list(re.finditer(pattern, content, re.DOTALL))
 
-    # Fast path: head_lines have content
-    if not _head_is_empty(node.head_lines):
-        return "\n".join(node.head_lines), preamble_full
+    # Filter valid Python snippets
+    snippet_tasks = []
+    for i, match in enumerate(matches):
+        language = (match.group(1) or "python").lower()
+        code_text = match.group(2).strip()
 
-    # Fallback: head_lines are empty
-    logger.info("[P3] %s has empty head_lines — using fallback summary", rel_path)
-    fallback_content = _read_fallback_content(file_path)
+        if language in ['python', 'py'] and len(code_text) > 50:
+            task = _analyze_code_snippet_async(code_text, i, source_file, client)
+            snippet_tasks.append(task)
 
-    if summarize_fn is not None:
+    if snippet_tasks:
+        # Execute all snippet analysis in parallel
+        results = await asyncio.gather(*snippet_tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, ToolSpec):
+                tools.append(result)
+            elif isinstance(result, Exception):
+                logger.warning("[P3/P2.5] Snippet analysis failed: %s", result)
+
+    return tools
+
+
+async def _analyze_code_snippet_async(
+    code_text: str, index: int, source_file: str, client
+) -> Optional[ToolSpec]:
+    """Async version: Use LLM to analyze a code snippet."""
+    try:
+        prompt = f"""Analyze this Python code snippet and extract the API specification.
+
+Code:
+```python
+{code_text[:3000]}
+```
+
+Extract:
+1. Function or class name (or generate a descriptive name if no explicit name)
+2. Input parameters and their types
+3. Output/return type
+4. Short description of what it does
+
+Respond in this exact JSON format:
+{{
+  "name": "function_or_class_name",
+  "input_schema": {{"param1": "type1", "param2": "type2"}},
+  "output_schema": "return_type",
+  "description": "Short functional description"
+}}
+
+Types should be: text, number, boolean, {{ }}, List [ ], or any.
+If no function/class found, generate a descriptive name like "process_data" or "parse_response".
+"""
+        response = await client.async_call_json("analyze_snippet", "", prompt)
+
+        if isinstance(response, dict):
+            name = response.get("name", f"snippet_{index}")
+            library = _detect_library(code_text)
+            url = f"{library}.{name}" if library else f"code.{name}"
+
+            return ToolSpec(
+                name=name,
+                api_type="CODE_SNIPPET",
+                url=url,
+                authentication="none",
+                input_schema=response.get("input_schema", {}),
+                output_schema=response.get("output_schema", "void"),
+                description=response.get("description", f"Code snippet: {name}"),
+                source_text=code_text[:3000],
+            )
+    except Exception as e:
+        logger.warning("[P3/P2.5] Failed to analyze snippet %d from %s: %s", index, source_file, e)
+
+    return None
+
+
+async def _analyze_script_file_async(
+    file_path: Path, rel_path: str, node: Any, client
+) -> Optional[ToolSpec]:
+    """
+    Async version: Analyze a script file using AST + LLM.
+    """
+    try:
+        source_code = file_path.read_text(encoding="utf-8")
+
+        # AST analysis for function signature
         try:
-            summary = summarize_fn(rel_path, fallback_content)
-            logger.info("[P3] LLM summary generated for %s (%d chars)", rel_path, len(summary))
-            return summary, preamble_llm
-        except Exception as exc:
-            logger.warning("[P3] LLM summary failed for %s: %s — using raw lines", rel_path, exc)
+            tree = ast.parse(source_code)
+        except SyntaxError as e:
+            logger.warning("[P3/P2.5] Syntax error in %s: %s", rel_path, e)
+            return None
 
-    # Final fallback: raw first 20 lines of file
-    raw_lines = fallback_content.splitlines()[:20]
-    return "\n".join(raw_lines), preamble_raw
+        # Find main function
+        main_func = None
+        for item in tree.body:
+            if isinstance(item, ast.FunctionDef):
+                if item.name in ["main", "run", "execute"]:
+                    main_func = item
+                    break
+                elif main_func is None:
+                    main_func = item
+
+        if not main_func:
+            # No function found - generate a simple spec
+            return ToolSpec(
+                name=file_path.stem,
+                api_type="SCRIPT",
+                url=rel_path,
+                authentication="none",
+                input_schema={},
+                output_schema="void",
+                description=f"Script: {file_path.name}",
+                source_text=source_code[:5000],
+            )
+
+        # Extract input parameters
+        input_schema = {}
+        for arg in main_func.args.args:
+            arg_name = arg.arg
+            arg_type = _infer_type_from_annotation(arg.annotation)
+            input_schema[arg_name] = arg_type
+
+        # Extract return type
+        output_schema = _infer_type_from_annotation(main_func.returns)
+
+        # Use LLM for description (async)
+        description = await _get_script_description_async(source_code[:3000], client)
+
+        return ToolSpec(
+            name=main_func.name,
+            api_type="SCRIPT",
+            url=rel_path,
+            authentication="none",
+            input_schema=input_schema,
+            output_schema=output_schema,
+            description=description,
+            source_text=source_code[:5000],
+        )
+
+    except Exception as e:
+        logger.warning("[P3/P2.5] Failed to analyze script %s: %s", rel_path, e)
+        return None
+
+
+async def _get_script_description_async(source_code: str, client) -> str:
+    """Async version: Use LLM to generate a description for the script."""
+    try:
+        prompt = f"""Analyze this Python script and provide a one-line description of its main functionality.
+
+Script:
+```python
+{source_code[:2000]}
+```
+
+Respond with just the description, no JSON, no markdown.
+"""
+        response = await client.async_call("describe_script", "", prompt)
+        if isinstance(response, str):
+            return response.strip()[:200]
+    except Exception:
+        pass
+    return "Python script"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Helper Functions (sync, no I/O)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _infer_type_from_annotation(annotation) -> str:
+    """Infer type from AST annotation."""
+    if annotation is None:
+        return "text"
+
+    if isinstance(annotation, ast.Name):
+        type_map = {
+            'str': 'text',
+            'int': 'number',
+            'float': 'number',
+            'bool': 'boolean',
+            'dict': '{ }',
+            'list': 'List [ ]',
+            'Dict': '{ }',
+            'List': 'List [ ]',
+            'Any': 'any',
+            'Optional': 'any',
+            'Union': 'any',
+        }
+        return type_map.get(annotation.id, 'text')
+
+    if isinstance(annotation, ast.Subscript):
+        if isinstance(annotation.value, ast.Name):
+            if annotation.value.id in ['List', 'list']:
+                return 'List [ ]'
+            elif annotation.value.id in ['Dict', 'dict']:
+                return '{ }'
+            elif annotation.value.id == 'Optional':
+                return _infer_type_from_annotation(annotation.slice)
+
+    if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+        return annotation.value
+
+    return "text"
+
+
+def _detect_library(code_text: str) -> Optional[str]:
+    """Detect the primary library being used in code."""
+    library_patterns = [
+        (r'import\s+([a-zA-Z_][a-zA-Z0-9_]*)', 1),
+        (r'from\s+([a-zA-Z_][a-zA-Z0-9_]*)', 1),
+    ]
+
+    imports = []
+    for pattern, group in library_patterns:
+        matches = re.findall(pattern, code_text)
+        imports.extend(matches)
+
+    stdlib = {'os', 'sys', 'json', 're', 'pathlib', 'typing', 'datetime', 'collections'}
+    external = [imp for imp in imports if imp not in stdlib]
+
+    if external:
+        return external[0]
+    elif imports:
+        return imports[0]
+
+    return None
+
+
+def _format_tool_spec_as_content(tool: ToolSpec) -> str:
+    """Format a ToolSpec as readable content for merged_doc_text."""
+    lines = [
+        f"[API Spec: {tool.name}]",
+        f"Type: {tool.api_type}",
+        f"URL: {tool.url}",
+        f"Authentication: {tool.authentication}",
+        "",
+        "Input Schema:",
+    ]
+    for param, ptype in tool.input_schema.items():
+        lines.append(f"  - {param}: {ptype}")
+
+    lines.extend([
+        "",
+        f"Output: {tool.output_schema}",
+        "",
+        f"Description: {tool.description}",
+    ])
+    return "\n".join(lines)

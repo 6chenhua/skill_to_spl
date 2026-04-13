@@ -1,4 +1,26 @@
 from datetime import datetime
+import atexit
+import asyncio
+import sys
+import os
+
+# Windows asyncio 修复：禁止 ProactorEventLoop 警告
+if sys.platform == 'win32':
+    # 设置环境变量来禁用 asyncio 警告
+    os.environ['PYTHONASYNCIODEBUG'] = '0'
+    
+    # 替换 ProactorEventLoop 的 __del__ 方法来抑制错误
+    try:
+        from asyncio.proactor_events import _ProactorBasePipeTransport
+        original_del = _ProactorBasePipeTransport.__del__
+        def _suppress_del(self):
+            try:
+                original_del(self)
+            except RuntimeError:
+                pass  # 忽略 "Event loop is closed" 错误
+        _ProactorBasePipeTransport.__del__ = _suppress_del
+    except Exception:
+        pass
 
 from pipeline.llm_client import LLMConfig
 from pipeline.orchestrator import run_pipeline, PipelineConfig
@@ -11,13 +33,38 @@ logging.basicConfig(
 )
 
 
+def _cleanup_on_exit():
+    """Clean up asyncio resources on program exit to prevent Windows warnings."""
+    try:
+        # Try to get and close the event loop
+        try:
+            loop = asyncio.get_event_loop()
+            if loop and not loop.is_closed():
+                # Cancel all pending tasks
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                # Run until all tasks are cancelled
+                if pending:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                loop.close()
+        except RuntimeError:
+            pass
+    except Exception:
+        pass
+
+
 if __name__ == '__main__':
+    # Register cleanup handler for Windows
+    if sys.platform == 'win32':
+        atexit.register(_cleanup_on_exit)
+
     skill = "pdf"
     # 生成当前时间字符串（格式：年-月-日_时-分-秒）
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
     # 拼接带时间戳的输出目录
     output_dir = f'output/{skill}_{current_time}'
-    output_dir = f'output/{skill}'
+    output_dir = f'output/{skill}-v2'
 
     llm_config = LLMConfig(
         # base_url='https://openrouter.ai/api/v1',
@@ -25,6 +72,7 @@ if __name__ == '__main__':
         model='gpt-4o',
         max_tokens=16000,
     )
+
     config = PipelineConfig(
         skill_root=f'skills/{skill}',
         output_dir=output_dir,

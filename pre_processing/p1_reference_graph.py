@@ -12,6 +12,7 @@ No role judgment is made here — that is P2's job.
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,8 @@ from typing import Any
 import yaml
 
 from models.data_models import FileNode, FileReferenceGraph
+
+logger = logging.getLogger(__name__)
 
 
 # ─── File classification ────────────────────────────────────────────────────
@@ -111,6 +114,35 @@ def _resolve_references(basenames: list[str], nodes: dict[str, FileNode]) -> lis
     return resolved
 
 
+def _filter_existing_references(
+    basenames: list[str],
+    filename_to_path: dict[str, str],
+    source_doc: str,
+) -> list[str]:
+    """
+    Filter references to only include files that actually exist in the skill package.
+    Logs warnings for dangling references.
+    Returns basenames (not full paths) to maintain compatibility with FileNode.references.
+    """
+    existing = []
+    missing = []
+    for name in basenames:
+        canonical = filename_to_path.get(name.lower())
+        if canonical:
+            existing.append(name)  # Keep original basename
+        else:
+            missing.append(name)
+
+    if missing:
+        logger.warning(
+            "[P1] %s references non-existent files (filtered): %s",
+            source_doc,
+            missing,
+        )
+
+    return existing
+
+
 # ─── Frontmatter parser ─────────────────────────────────────────────────────
 
 def _parse_frontmatter(content: str) -> dict[str, Any]:
@@ -171,13 +203,26 @@ def build_reference_graph(skill_root: str) -> FileReferenceGraph:
     frontmatter = _parse_frontmatter(skill_md_content)
 
     # ── Enumerate all files ─────────────────────────────────────────────────
-    nodes: dict[str, FileNode] = {}
+    # Phase 1: First pass - collect all file paths to build filename index
+    all_file_paths: list[Path] = []
     for file_path in sorted(root.rglob("*")):
         if not file_path.is_file():
             continue
         if _should_skip(file_path.relative_to(root)):
             continue
+        all_file_paths.append(file_path)
 
+    # Build filename -> path index for reference validation
+    filename_to_path: dict[str, str] = {}
+    for file_path in all_file_paths:
+        rel = str(file_path.relative_to(root))
+        filename = Path(rel).name.lower()
+        filename_to_path[filename] = rel
+
+    # Phase 2: Second pass - process files with validated references
+    nodes: dict[str, FileNode] = {}
+    docs_content: dict[str, str] = {}  # NEW: Store full content for all .md files
+    for file_path in all_file_paths:
         rel = str(file_path.relative_to(root))
         kind = _classify_kind(rel)
         size = file_path.stat().st_size
@@ -185,7 +230,10 @@ def build_reference_graph(skill_root: str) -> FileReferenceGraph:
         if kind == "doc":
             content = file_path.read_text(encoding="utf-8", errors="replace")
             head_lines = content.splitlines()[:20]
-            refs = _scan_references(content)
+            # Scan references and filter to only existing files
+            raw_refs = _scan_references(content)
+            refs = _filter_existing_references(raw_refs, filename_to_path, rel)
+            docs_content[rel] = content  # NEW: Save full content for doc files
         elif kind == "script":
             head_lines = _read_head_comment(file_path, max_lines=5)
             refs = []  # script-internal references NOT included (avoids chain explosion)
@@ -216,4 +264,5 @@ def build_reference_graph(skill_root: str) -> FileReferenceGraph:
         frontmatter=frontmatter,
         nodes=nodes,
         edges=edges,
+        docs_content=docs_content,  # NEW: Include full content for all .md files
     )

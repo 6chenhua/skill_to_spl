@@ -39,7 +39,7 @@ def run_p2_file_role_resolver(
         dict mapping rel_path → FileRoleEntry dict (JSON-serializable).
         SKILL.md entry is added by this function, not by the LLM.
     """
-    skill_md_references = _extract_skill_md_references(graph.skill_md_content, graph.edges)
+    skill_md_references = _extract_skill_md_references(graph.skill_md_content, graph.edges)  # 提取skill.md中引用文件的那一行内容 --> 给llm判断tone用
     nodes_summary = _format_nodes_summary(graph)
     edges_json    = json.dumps(graph.edges, indent=2)
 

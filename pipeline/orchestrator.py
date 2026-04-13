@@ -29,8 +29,6 @@ from typing import Optional
 from pipeline.llm_client import LLMClient, LLMConfig, SessionUsage
 from models.data_models import PipelineResult, StructuredSpec
 from pipeline.llm_steps import (
-    make_p3_summarize_fn,
-    run_p2_file_role_resolver,
     run_step1_structure_extraction,
     run_step3a_entity_extraction,
     run_step3b_workflow_analysis,
@@ -38,7 +36,13 @@ from pipeline.llm_steps import (
     run_step4_spl_emission_parallel,
 )
 from pre_processing.p1_reference_graph import build_reference_graph
+from pre_processing.p2_file_roles import assign_file_priorities
 from pre_processing.p3_assembler import assemble_skill_package
+from pipeline.llm_steps.step4_spl_emission import (
+    _call_4a, _call_4b, _call_4c, _call_4d, _call_4e, _call_4f,
+    _extract_symbol_table, _format_symbol_table, _prepare_step4_inputs_parallel,
+    _assemble_spl, _build_review_summary, validate_and_fix_worker_nesting,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -153,25 +157,29 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
     ckpt.save("p1_graph", graph)
     logger.info("[P1] found %d files, %d doc edges", len(graph.nodes), len(graph.edges))
 
-    # ── P2: File Role Resolver (LLM) ─────────────────────────────────────────
-    logger.info("[P2] resolving file roles...")
-    file_role_map = run_p2_file_role_resolver(graph=graph, client=client)
+    # ── P2: File Role Resolver (rule-based, no LLM) ───────────────────────────────
+    logger.info("[P2] assigning file priorities (rule-based)...")
+    file_role_map = assign_file_priorities(graph=graph)
     ckpt.save("p2_file_role_map", file_role_map)
 
-    # ── P3: Skill Package Assembler (code + optional LLM fallback) ──────────────
-    logger.info("[P3] assembling skill package...")
+    # ── P3: Skill Package Assembler (code + P2.5 API analysis merged) ──────────────
+    logger.info("[P3] assembling skill package with P2.5 API analysis...")
     package = assemble_skill_package(
         graph=graph,
         file_role_map=file_role_map,
-        summarize_fn=make_p3_summarize_fn(client),
+        client=client,  # P2.5 uses this for script and code snippet analysis
     )
-    ckpt.save("p3_package", {"skill_id": package.skill_id,
-                             "merged_doc_chars": len(package.merged_doc_text)})
+    ckpt.save("p3_package", {"skill_id": package.skill_id, "merged_doc_chars": len(package.merged_doc_text), "tools_count": len(package.tools)})
+    logger.info("[P3] assembled with %d pre-extracted tools (scripts + code snippets)", len(package.tools))
 
     # ── Step 1: Structure Extraction (LLM) ───────────────────────────────────
     logger.info("[Step 1] extracting structure...")
-    bundle = run_step1_structure_extraction(package=package, client=client)
+    bundle, step1_network_apis = run_step1_structure_extraction(package=package, client=client)
     ckpt.save("step1_bundle", bundle)
+
+    # Merge network APIs from Step 1 into package.tools
+    package.tools.extend(step1_network_apis)
+    logger.info("[Tools] total merged tools: %d", len(package.tools))
 
     # ── Step 3 & 4: Parallel execution with dependency-driven scheduling ───
     # 
@@ -185,29 +193,23 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
     #   S4F
     #
     # Phase 1: Step 3A (must complete first)
-    # Import Step 4 helper functions for parallel execution
-    from pipeline.llm_steps.step4_spl_emission import (
-        _call_4a, _call_4b, _call_4c, _call_4d, _call_4e, _call_4f,
-        _extract_symbol_table, _format_symbol_table, _prepare_step4_inputs_parallel,
-        _assemble_spl, _build_review_summary,
-    )
-    from models.data_models import SPLSpec
     
     logger.info("[Step 3A] extracting entities...")
     entities = run_step3a_entity_extraction(bundle=bundle, client=client)
-    
+
     # Phase 2: Parallel lines
-    #   Line 1: Step 3B (workflow analysis) + S4D (APIs)
-    #   Line 2: S4C (variables/files) → S4A + S4B
+    # Line 1: Step 3B (workflow analysis) + S4D (APIs)
+    # Line 2: S4C (variables/files) → S4A + S4B
     logger.info("[Parallel] launching Line 1 (3B→S4D) and Line 2 (S4C→S4A/B)...")
-    
+
     with ThreadPoolExecutor(max_workers=2) as phase2_pool:
-        # Line 1: Step 3B (needs entity_ids from 3A)
+        # Line 1: Step 3B (needs entity_ids from 3A and tools from P2.5/Step 1)
         entity_ids = [e.entity_id for e in entities]
         future_3b = phase2_pool.submit(
             run_step3b_workflow_analysis,
             bundle=bundle,
             entity_ids=entity_ids,
+            tools=package.tools,
             client=client,
         )
         
@@ -220,10 +222,13 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
         )
         
         future_4c = phase2_pool.submit(_call_4c, client, s4c_in)
-        
+
         # Wait for both lines to complete
-        structured_spec_partial = future_3b.result()  # Has workflow_steps, flows, but empty entities
+        structured_spec_partial = future_3b.result() # Has workflow_steps, flows, but empty entities
         block_4c = future_4c.result()
+
+        # Save S4C output (variables and files)
+        ckpt.save("step4c_variables_files", {"variables_files_spl": block_4c})
     
     # Build complete StructuredSpec
     structured_spec = StructuredSpec(
@@ -263,19 +268,47 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
         # Collect S4A, S4B results
         block_4a = future_4a.result()
         block_4b = future_4b.result()
-        
+
+        # Save S4A and S4B outputs
+        ckpt.save("step4a_persona", {"persona_spl": block_4a})
+        ckpt.save("step4b_constraints", {"constraints_spl": block_4b})
+
         # Wait for S4D
         block_4d = future_4d.result()
+
+        # Save S4D output
+        ckpt.save("step4d_apis", {"apis_spl": block_4d})
     
-    # Phase 4: S4E (merge point - needs symbol_table from Line 2 and apis_spl from Line 1)
-    logger.info("[Step 4] Phase 4: S4E (worker)...")
-    block_4e = _call_4e(client, s4e_inputs, symbol_table_text, block_4d)
-    
-    # Phase 5: S4F (final)
-    block_4f = ""
-    if s4f_inputs["has_examples"]:
-        logger.info("[Step 4] Phase 5: S4F (examples)...")
-        block_4f = _call_4f(client, s4f_inputs, block_4e)
+        # Phase 4: S4E (merge point - needs symbol_table from Line 2 and apis_spl from Line 1)
+        logger.info("[Step 4] Phase 4: S4E (worker)...")
+        block_4e_original = _call_4e(client, s4e_inputs, symbol_table_text, block_4d)
+        ckpt.save("step4e_worker_original", {"worker_spl": block_4e_original})
+
+        # Phase 4.5: S4E1/S4E2 - Validate and fix nested BLOCK structures
+        block_4e, nesting_result = validate_and_fix_worker_nesting(client, block_4e_original)
+        
+        # Save S4E1 detection result
+        ckpt.save("step4e1_nesting_detection", nesting_result)
+        
+        # Save S4E2 result if violations were found and fixed
+        if nesting_result.get("has_violations", False):
+            ckpt.save("step4e2_nesting_fix", {
+                "original": block_4e_original,
+                "fixed": block_4e,
+                "violations_count": len(nesting_result.get("violations", [])),
+            })
+            logger.info("[Step 4] Phase 4.5: S4E1 detected %d violations, S4E2 fixed them",
+                       len(nesting_result.get("violations", [])))
+        else:
+            logger.info("[Step 4] Phase 4.5: S4E1 - no nested BLOCK violations found")
+
+        # Phase 5: S4F (final)
+        block_4f = ""
+        if s4f_inputs["has_examples"]:
+            logger.info("[Step 4] Phase 5: S4F (examples)...")
+            block_4f = _call_4f(client, s4f_inputs, block_4e)
+            # Save S4F output (examples)
+            ckpt.save("step4f_examples", {"examples_spl": block_4f})
     
     # Assemble final SPL
     from pipeline.llm_steps.step4_spl_emission import _assemble_spl, _build_review_summary
@@ -310,6 +343,9 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
         structured_spec=structured_spec,
         spl_spec=spl_spec,
     )
+
+    # ── Cleanup HTTP clients to prevent Windows asyncio warnings ─────────────
+    client.close()
 
     logger.info("=== pipeline complete: %s ===", graph.skill_id)
     return result

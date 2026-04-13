@@ -75,17 +75,19 @@ class _LLMClient:
     """Thin wrapper around the real Anthropic client for test calls."""
 
     def __init__(self):
-        import anthropic
-        self._client = anthropic.Anthropic()
+        import openai
+        self._client = openai.OpenAI()
 
-    def call(self, *, system: str, user: str, model: str = "claude-sonnet-4-6") -> str:
-        response = self._client.messages.create(
+    def call(self, *, system: str, user: str, model: str = "gpt-4o") -> str:
+        response = self._client.chat.completions.create(
             model=model,
-            max_tokens=4096,
-            system=system,
-            messages=[{"role": "user", "content": user}],
+            max_tokens=16000,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user}
+            ],
         )
-        return response.content[0].text
+        return response.choices[0].message.content
 
 
 @pytest.fixture(scope="session")

@@ -1,6 +1,6 @@
-<mxfile host="www.draw.io" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0" version="29.6.3">
+<mxfile host="www.draw.io" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0">
   <diagram name="第 1 页" id="ev4WDnPzVM5PQ6J5VgXk">
-    <mxGraphModel dx="2868" dy="878" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+    <mxGraphModel dx="2854" dy="878" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -688,6 +688,24 @@
         </mxCell>
         <mxCell id="fCP3ZVzkIydIxqKMDIIO-75" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;b&gt;&lt;font style=&quot;font-size: 14px;&quot;&gt;Step 4E&lt;/font&gt;&lt;/b&gt;" vertex="1">
           <mxGeometry height="30" width="60" x="149" y="1704" as="geometry" />
+        </mxCell>
+        <mxCell id="Y0Tjc-uGwcX3BWZiC05u-1" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="1477" y="419" as="sourcePoint" />
+            <mxPoint x="1625" y="353" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Y0Tjc-uGwcX3BWZiC05u-2" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;" value="这里理应包含：&lt;div&gt;1. 代码片段（skill给出的工具能力展示）&lt;/div&gt;&lt;div&gt;2. 本地的脚本文件&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;对于每个工具，应该提取出输入/输出schema以及简短功能说明&lt;/div&gt;" vertex="1">
+          <mxGeometry height="78" width="346" x="1631.5" y="310.5" as="geometry" />
+        </mxCell>
+        <mxCell id="Y0Tjc-uGwcX3BWZiC05u-3" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="1493" y="463" as="sourcePoint" />
+            <mxPoint x="1610" y="479" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Y0Tjc-uGwcX3BWZiC05u-4" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;" value="这里提取的应该是完整的工作流执行路径，而不是任何与所谓“示例相关的内容都放到这一块”&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;例如，对于工具的使用示例，就不该放在这一块内容中&lt;/div&gt;" vertex="1">
+          <mxGeometry height="81" width="272" x="1618.75" y="436" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>

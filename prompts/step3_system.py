@@ -814,101 +814,117 @@ Return exactly this JSON structure:
 """
 
 s3_b_v3 = """You extract structured workflow information from skill documentation.
- 
+
 Your output describes what the skill does procedurally — the steps, the
 branches, and the failure paths — in a structured, implementation-neutral form.
 This output is consumed by a downstream SPL code generator; your job is to
 capture the semantic structure accurately, not to reference any SPL syntax.
- 
+
 Your output has three parts:
-  1. workflow_steps    — the ordered steps of the main execution path
-  2. alternative_flows — complete alternative procedures when a high-level
-                         precondition is not met
-  3. exception_flows   — explicit failure-handling procedures when a specific
-                         step cannot continue
- 
+1. workflow_steps — the ordered steps of the main execution path
+2. alternative_flows — complete alternative procedures when a high-level
+precondition is not met
+3. exception_flows — explicit failure-handling procedures when a specific
+step cannot continue
+
+═══════════════════════════════════════════════════════════════════════════
+## AVAILABLE TOOLS
+
+The following tools have been pre-extracted from scripts and documentation.
+When a step uses a tool, you MUST reference it by its exact name from this list.
+
+{{available_tools}}
+
+───────────────────────────────────────────────────────────────────────────
+### Tool Selection Rules
+
+action_type "EXTERNAL_API" → tool_hint MUST be one of the NETWORK_API names
+action_type "EXEC_SCRIPT" → tool_hint MUST be one of the SCRIPT names
+action_type "LOCAL_CODE_SNIPPET" → tool_hint MUST be one of the CODE_SNIPPET names
+action_type "LLM_TASK" | "FILE_READ" | "FILE_WRITE" | "USER_INTERACTION" → tool_hint should be ""
+
+If the step uses a tool but you cannot match it exactly, add a needs_review_item.
+
 ═══════════════════════════════════════════════════════════════════════════
 ## PHASE 1 — CLASSIFY before you extract
- 
+
 Read ALL workflow text first. Classify each paragraph or block as:
- 
-  MAIN        the default execution path; runs unless diverted
-  DECISION    a fork-and-merge choice within the main path (both branches
-              converge to the same output; stays inside workflow_steps)
-  ALTERNATIVE a complete substitute procedure triggered by a high-level
-              precondition not being met
-  EXCEPTION   a failure-handling procedure when a specific step fails and
-              cannot continue
- 
+
+MAIN the default execution path; runs unless diverted
+DECISION a fork-and-merge choice within the main path (both branches
+converge to the same output; stays inside workflow_steps)
+ALTERNATIVE a complete substitute procedure triggered by a high-level
+precondition not being met
+EXCEPTION a failure-handling procedure when a specific step fails and
+cannot continue
+
 Only after classifying should you extract the structured objects.
- 
+
 ───────────────────────────────────────────────────────────────────────────
 ### The four types — definitions and examples
- 
+
 MAIN / DECISION (both go into workflow_steps):
-  The default path and any choice points within it.  A DECISION is a branch
-  where both options are part of normal operation and produce the same outputs
-  (e.g., "use tool A if available, otherwise use tool B").
- 
+The default path and any choice points within it. A DECISION is a branch
+where both options are part of normal operation and produce the same outputs
+(e.g., "use tool A if available, otherwise use tool B").
+
 ALTERNATIVE_FLOW:
-  A self-contained, complete procedure that replaces the main flow when a
-  high-level precondition is not met.  It has its own sequence of steps that
-  stand alone and may use entirely different tools or produce different outputs.
-  Signal words: "if <situation>, do the following instead: A, B, C..."
- 
-  Example: "TypeScript is recommended. For Python servers: initialize with
-  FastMCP, define tools with @mcp.tool, run with mcp.run()."
-  → ALTERNATIVE: "user chooses Python instead of TypeScript"
-  Reason: the Python path is a complete substitute procedure with its own
-  steps — not a parameter swap inside the TypeScript flow.
- 
+A self-contained, complete procedure that replaces the main flow when a
+high-level precondition is not met. It has its own sequence of steps that
+stand alone and may use entirely different tools or produce different outputs.
+Signal words: "if <situation>, do the following instead: A, B, C..."
+
+Example: "TypeScript is recommended. For Python servers: initialize with
+FastMCP, define tools with @mcp.tool, run with mcp.run()."
+→ ALTERNATIVE: "user chooses Python instead of TypeScript"
+Reason: the Python path is a complete substitute procedure with its own
+steps — not a parameter swap inside the TypeScript flow.
+
 EXCEPTION_FLOW:
-  A recovery or graceful-stop procedure triggered when a specific step fails
-  at runtime and cannot continue.  Requires the source to explicitly describe
-  WHAT TO DO on failure — not just that failure is possible.
-  Signal words: "if <step> fails / errors / cannot complete, then..."
- 
-  Example: "Run npm run build. If the build fails, review the TypeScript errors
-  shown in the output, fix them, and run the build again before proceeding."
-  → The build command itself goes in workflow_steps.
-  → The failure handling goes in exception_flows (explicitly described).
- 
+A recovery or graceful-stop procedure triggered when a specific step fails
+at runtime and cannot continue. Requires the source to explicitly describe
+WHAT TO DO on failure — not just that failure is possible.
+Signal words: "if <step> fails / errors / cannot complete, then..."
+
+Example: "Run npm run build. If the build fails, review the TypeScript errors
+shown in the output, fix them, and run the build again before proceeding."
+→ The build command itself goes in workflow_steps.
+→ The failure handling goes in exception_flows (explicitly described).
+
 DECISION (stays in workflow_steps, not ALTERNATIVE):
-  "Choose transport: Streamable HTTP for remote servers, stdio for local."
-  → Both options configure the same server artifact; they are a DECISION
-  inside the main flow, NOT a separate alternative procedure.
- 
+"Choose transport: Streamable HTTP for remote servers, stdio for local."
+→ Both options configure the same server artifact; they are a DECISION
+inside the main flow, NOT a separate alternative procedure.
+
 ═══════════════════════════════════════════════════════════════════════════
 ## PHASE 2 — EXTRACT structured objects
- 
+
 ───────────────────────────────────────────────────────────────────────────
 ### A. WORKFLOW STEPS (MAIN path only)
- 
+
 Extract ONLY steps belonging to the main execution path (including DECISION
-branches within it).  Do NOT put ALTERNATIVE or EXCEPTION content here.
- 
-  step_id      "step.<action_name>" in snake_case
-  description  Concise, concrete description of what this step does.
-               Use abstract action verbs.
-               BAD:  "Run check_fields.py --input {pdf} --out fields.json"
-               GOOD: "Detect fillable form fields in the input PDF"
-  prerequisites  entity_ids (from the provided list) that must exist first
-  produces       entity_ids (from the provided list) this step creates
-  is_validation_gate  true ONLY when: (a) the step comes from an EVIDENCE
-               requirement, AND (b) the source describes a clear pass/fail
-               outcome.
-  effects      one or more of: NETWORK | EXEC | WRITE | READ | REMOTE_RUN
-  execution_mode  Choose the one that best fits the step:
-    "PROMPT_TO_CODE"  the step involves running or generating a script/tool;
-                      LLM will produce the code
-    "CODE"            the source contains a literal code block to run verbatim
-    "USER_INPUT"      the step requires the user to provide information or
-                      confirm before the procedure can continue
-                      (e.g., "ask user which service to integrate",
-                       "confirm before proceeding with destructive operation")
-    "LLM_PROMPT"      a reasoning or judgment task; default for all others
-  tool_hint    explicit tool or script name from the TOOLS section, or ""
-  source_text  verbatim quote from WORKFLOW or EVIDENCE
+branches within it). Do NOT put ALTERNATIVE or EXCEPTION content here.
+
+step_id "step.<action_name>" in snake_case
+description Concise, concrete description of what this step does.
+Use abstract action verbs.
+BAD: "Run check_fields.py --input {pdf} --out fields.json"
+GOOD: "Detect fillable form fields in the input PDF"
+prerequisites entity_ids (from the provided list) that must exist first
+produces entity_ids (from the provided list) this step creates
+is_validation_gate true ONLY when: (a) the step comes from an EVIDENCE
+requirement, AND (b) the source describes a clear pass/fail
+outcome.
+action_type Choose the one that best fits the step:
+"EXTERNAL_API" external HTTP service call → use NETWORK_API tool name
+"LLM_TASK" pure LLM reasoning task → no tool_hint
+"EXEC_SCRIPT" execute local script → use SCRIPT tool name
+"FILE_READ" read file operation → no tool_hint
+"FILE_WRITE" write file operation → no tool_hint
+"USER_INTERACTION" need user input before proceeding → no tool_hint
+"LOCAL_CODE_SNIPPET" inline code example → use CODE_SNIPPET tool name
+tool_hint MUST be exact name from AVAILABLE TOOLS list, or "" if no tool used
+source_text verbatim quote from WORKFLOW or EVIDENCE
  
 ───────────────────────────────────────────────────────────────────────────
 ### B. ALTERNATIVE FLOWS
@@ -920,9 +936,9 @@ procedure for a specific condition.  Never generate from a vague implication.
   condition    free-text description of when this alternative is taken
                (closely paraphrased from source)
   description  one sentence: what this alternative procedure accomplishes
-  steps        ordered list of steps in this alternative procedure:
-               each step has: description, execution_mode, tool_hint, source_text
-               (same execution_mode values as workflow_steps above)
+steps ordered list of steps in this alternative procedure:
+each step has: description, action_type, tool_hint, source_text
+(same action_type values as workflow_steps above)
   source_text  verbatim anchor spanning the whole alternative description
   provenance   "EXPLICIT" only — if unsure, add to needs_review instead
  
@@ -936,8 +952,8 @@ fails.  A validation gate existing is NOT sufficient on its own.
   condition    free-text description of the failure condition
                (e.g., "npm run build fails with TypeScript compilation errors")
   log_ref      text for an optional log reference; empty string if not mentioned
-  steps        ordered list of recovery/stop steps:
-               each step has: description, execution_mode, tool_hint, source_text
+steps ordered list of recovery/stop steps:
+each step has: description, action_type, tool_hint, source_text
   source_text  verbatim anchor spanning the failure description
   provenance   "EXPLICIT" | "ASSUMED"
  
@@ -958,52 +974,9 @@ fails.  A validation gate existing is NOT sufficient on its own.
       "description":        "Concise description of the action",
       "prerequisites":      ["entity_id"],
       "produces":           ["entity_id"],
-      "is_validation_gate": false,
-      "effects":            ["EXEC"],
-      "execution_mode":     "LLM_PROMPT",
-      "tool_hint":          "",
-      "source_text":        "<verbatim quote>"
-    }
-  ],
-  "alternative_flows": [
-    {
-      "flow_id":     "alt-001",
-      "condition":   "user chooses Python instead of TypeScript",
-      "description": "Implement MCP server using FastMCP instead of TypeScript SDK",
-      "steps": [
-        {
-          "description":    "Load Python SDK documentation",
-          "execution_mode": "LLM_PROMPT",
-          "tool_hint":      "WebFetch",
-          "source_text":    "<verbatim quote>"
-        }
-      ],
-      "source_text": "<verbatim quote spanning the whole alternative>",
-      "provenance":  "EXPLICIT"
-    }
-  ],
-  "exception_flows": [
-    {
-      "flow_id":    "exc-001",
-      "condition":  "npm run build fails with TypeScript compilation errors",
-      "log_ref":    "",
-      "steps": [
-        {
-          "description":    "Display TypeScript compilation errors to the user",
-          "execution_mode": "LLM_PROMPT",
-          "tool_hint":      "",
-          "source_text":    "<verbatim quote>"
-        },
-        {
-          "description":    "Ask user to confirm when errors are fixed and ready to retry",
-          "execution_mode": "USER_INPUT",
-          "tool_hint":      "",
-          "source_text":    "<verbatim quote>"
-        }
-      ],
-      "source_text": "<verbatim quote spanning the failure description>",
-      "provenance":  "EXPLICIT"
-    }
-  ]
+"is_validation_gate": false,
+"action_type": "LLM_TASK",
+"tool_hint": "",
+"source_text": "<verbatim quote>"
 }
 """

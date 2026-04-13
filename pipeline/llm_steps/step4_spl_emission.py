@@ -51,6 +51,7 @@ logger = logging.getLogger(__name__)
 def run_step4_spl_emission(
     bundle: SectionBundle,
     interface_spec: StructuredSpec,
+    tools: list,  # list[ToolSpec]
     skill_id: str,
     client: LLMClient,
 ) -> SPLSpec:
@@ -77,36 +78,47 @@ def run_step4_spl_emission(
     """
     # Prepare all inputs upfront (lightweight, no LLM calls)
     s4a_inputs, s4b_inputs, s4c_inputs, s4d_inputs, s4e_inputs, s4f_inputs = _prepare_step4_inputs_v2(
-        bundle, interface_spec
+        bundle, interface_spec, tools
     )
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         # ── Phase 1: Launch S4C and S4D immediately (they are independent) ─────
-        logger.info("[Step 4] Phase 1: Launching S4C (variables/files) and S4D (apis) in parallel")
-        
+        # S4D now launches one LLM call per tool for individual API generation
+        logger.info("[Step 4] Phase 1: Launching S4C (variables/files) and S4D (apis per tool) in parallel")
+
         future_4c = pool.submit(_call_4c, client, s4c_inputs)
-        future_4d = pool.submit(_call_4d, client, s4d_inputs)
+
+        # Launch S4D: one LLM call per tool
+        tools_list = s4d_inputs.get("tools_list", [])
+        if s4d_inputs["has_tools"] and tools_list:
+            logger.info("[Step 4] Phase 1: Launching S4D with %d tools (individual LLM calls)", len(tools_list))
+            futures_4d = [pool.submit(_call_4d, client, tool) for tool in tools_list]
+        else:
+            logger.info("[Step 4] Phase 1: No tools found, S4D skipped")
+            futures_4d = []
 
         # ── Phase 2: When S4C completes, extract symbol table and launch S4A + S4B ──
         # Note: We don't wait for S4D here - this is the key optimization!
         logger.info("[Step 4] Phase 2: Waiting for S4C to extract symbol table...")
         block_4c = future_4c.result()
-        
+
         symbol_table = _extract_symbol_table(block_4c)
         symbol_table_text = _format_symbol_table(symbol_table)
         logger.info("[Step 4] Symbol table extracted — variables: %d, files: %d",
-                     len(symbol_table["variables"]), len(symbol_table["files"]))
+            len(symbol_table["variables"]), len(symbol_table["files"]))
 
         # Launch S4A and S4B immediately (they only need symbol_table, not apis_spl)
         logger.info("[Step 4] Phase 2: Launching S4A (persona) and S4B (constraints) in parallel")
         future_4a = pool.submit(_call_4a, client, s4a_inputs, symbol_table_text)
         future_4b = pool.submit(_call_4b, client, s4b_inputs, symbol_table_text)
 
-        # ── Phase 3: Wait for S4D to complete, then launch S4E ─────────────────
-        # S4E needs both symbol_table (ready) and apis_spl (from S4D)
+        # ── Phase 3: Wait for all S4D calls to complete, then launch S4E ─────────────────
+        # S4E needs both symbol_table (ready) and apis_spl (from S4D - now multiple results)
         logger.info("[Step 4] Phase 3: Waiting for S4D to complete...")
-        block_4d = future_4d.result()
-        
+        block_4d_parts = [f.result() for f in futures_4d] if futures_4d else []
+        block_4d = "\n\n".join(block_4d_parts) if block_4d_parts else ""
+        logger.info("[Step 4] Phase 3: S4D completed — %d API definitions generated", len(block_4d_parts))
+
         logger.info("[Step 4] Phase 3: Launching S4E (worker)")
         future_4e = pool.submit(_call_4e, client, s4e_inputs, symbol_table_text, block_4d)
 
@@ -180,29 +192,37 @@ def run_step4_spl_emission_parallel(
         # ── Line 1: S4C (needs entities) ─────────────────────────────────────
         logger.info("[Step 4] Line 1: Launching S4C (variables/files)")
         future_4c = pool.submit(_call_4c, client, s4c_inputs)
-        
+
         # ── Line 2: S4D (needs workflow_steps with NETWORK effects) ──────────
-        logger.info("[Step 4] Line 2: Launching S4D (apis)")
-        future_4d = pool.submit(_call_4d, client, s4d_inputs)
+        # S4D now launches one LLM call per tool for individual API generation
+        tools_list = s4d_inputs.get("tools_list", [])
+        if s4d_inputs["has_tools"] and tools_list:
+            logger.info("[Step 4] Line 2: Launching S4D with %d tools (individual LLM calls)", len(tools_list))
+            futures_4d = [pool.submit(_call_4d, client, tool) for tool in tools_list]
+        else:
+            logger.info("[Step 4] Line 2: No tools found, S4D skipped")
+            futures_4d = []
 
         # ── Line 1 continued: When S4C completes, extract symbol_table ───────
         logger.info("[Step 4] Line 1: Waiting for S4C to extract symbol table...")
         block_4c = future_4c.result()
-        
+
         symbol_table = _extract_symbol_table(block_4c)
         symbol_table_text = _format_symbol_table(symbol_table)
         logger.info("[Step 4] Symbol table extracted — variables: %d, files: %d",
-                     len(symbol_table["variables"]), len(symbol_table["files"]))
+            len(symbol_table["variables"]), len(symbol_table["files"]))
 
         # Launch S4A and S4B (they only need symbol_table, not apis_spl)
         logger.info("[Step 4] Line 1: Launching S4A (persona) and S4B (constraints)")
         future_4a = pool.submit(_call_4a, client, s4a_inputs, symbol_table_text)
         future_4b = pool.submit(_call_4b, client, s4b_inputs, symbol_table_text)
 
-        # ── Merge Point: Wait for Line 2 (S4D) to complete ───────────────────
+        # ── Merge Point: Wait for all Line 2 (S4D) calls to complete ───────────────────
         logger.info("[Step 4] Merge point: Waiting for Line 2 (S4D) to complete...")
-        block_4d = future_4d.result()
-        
+        block_4d_parts = [f.result() for f in futures_4d] if futures_4d else []
+        block_4d = "\n\n".join(block_4d_parts) if block_4d_parts else ""
+        logger.info("[Step 4] Merge point: S4D completed — %d API definitions generated", len(block_4d_parts))
+
         # ── S4E: Needs both symbol_table (Line 1) and apis_spl (Line 2) ──────
         logger.info("[Step 4] Launching S4E (worker) - merge of Line 1 and Line 2")
         future_4e = pool.submit(_call_4e, client, s4e_inputs, symbol_table_text, block_4d)
@@ -251,16 +271,13 @@ def _call_4c(client: LLMClient, inputs: dict) -> str:
         templates.render_s4c_user(inputs["entities_text"], inputs["omit_files_text"]),
     )
 
-def _call_4d(client: LLMClient, inputs: dict) -> str:
-    """Generate DEFINE_APIS block."""
-    if not inputs["has_network_steps"]:
-        return ""
+def _call_4d(client: LLMClient, tool: dict) -> str:
+    """Generate DEFINE_APIS block for a single tool."""
+    tool_json = json.dumps(tool, indent=2, ensure_ascii=False)
     return client.call(
-        "step4d_apis",
+        "step4d_api_single",
         templates.S4D_SYSTEM,
-        templates.render_s4d_user(
-            network_steps_json=inputs["network_steps_json"],
-        ),
+        templates.render_s4d_user(tool_json),
     )
 
 def _call_4a(client: LLMClient, inputs: dict, symbol_table_text: str) -> str:
@@ -290,6 +307,9 @@ def _call_4b(client: LLMClient, inputs: dict, symbol_table_text: str) -> str:
 
 def _call_4e(client: LLMClient, inputs: dict, symbol_table_text: str, apis_spl: str) -> str:
     """Generate WORKER block (MAIN_FLOW + ALTERNATIVE_FLOW + EXCEPTION_FLOW)."""
+    # Convert tools_list to JSON string for S4E
+    tools_list = inputs.get("tools_list", [])
+    tools_json_str = json.dumps(tools_list, indent=2, ensure_ascii=False) if tools_list else "[]"
     s4e_system, s4e_user = templates.render_s4e_user(
         workflow_steps_json=inputs["workflow_steps_json"],
         workflow_prose=inputs["workflow_prose"],
@@ -297,8 +317,98 @@ def _call_4e(client: LLMClient, inputs: dict, symbol_table_text: str, apis_spl: 
         exception_flows_json=inputs["exception_flows_json"],
         symbol_table=symbol_table_text,
         apis_spl=apis_spl,
+        tools_json=tools_json_str,
     )
     return client.call(step_name="step4e_worker", system=s4e_system, user=s4e_user)
+
+
+def _call_4e1(client: LLMClient, worker_spl: str) -> dict:
+    """Detect illegal nested BLOCK structures in WORKER SPL.
+
+    Returns a dict with:
+    - has_violations: bool
+    - violations: list of violation dicts
+    """
+    s4e1_user = templates.render_s4e1_user(worker_spl=worker_spl)
+    response = client.call(
+        step_name="step4e1_nesting_detection",
+        system=templates.S4E1_SYSTEM,
+        user=s4e1_user,
+    )
+
+    # Parse JSON response (handle markdown code blocks)
+    try:
+        # Strip markdown fences if present
+        cleaned = response.strip()
+        if cleaned.startswith("```"):
+            # Remove opening fence
+            lines = cleaned.split("\n")
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            cleaned = "\n".join(lines).strip()
+
+        result = json.loads(cleaned)
+        return result
+    except json.JSONDecodeError as e:
+        logger.warning("[Step 4E1] Failed to parse JSON response: %s", e)
+        logger.debug("[Step 4E1] Raw response:\n%s", response[:500])
+        return {"has_violations": False, "violations": []}
+
+
+def _call_4e2(client: LLMClient, worker_spl: str, violations: list) -> str:
+    """Fix illegal nested BLOCK structures by flattening.
+
+    Returns the corrected WORKER SPL text.
+    """
+    violations_json = json.dumps(violations, indent=2, ensure_ascii=False)
+    s4e2_user = templates.render_s4e2_user(
+        worker_spl=worker_spl,
+        violations_json=violations_json,
+    )
+    return client.call(
+        step_name="step4e2_nesting_fix",
+        system=templates.S4E2_SYSTEM,
+        user=s4e2_user,
+    )
+
+
+def validate_and_fix_worker_nesting(client: LLMClient, worker_spl: str) -> tuple[str, dict]:
+    """Validate and fix nested BLOCK structures in WORKER SPL.
+
+    Args:
+        client: LLM client for making calls
+        worker_spl: The generated WORKER SPL text
+
+    Returns:
+        Tuple of (corrected_worker_spl, detection_result)
+        - corrected_worker_spl: The fixed SPL (or original if no violations)
+        - detection_result: The full S4E1 detection result dict
+    """
+    logger.info("[Step 4E.1] Checking for illegal BLOCK nesting...")
+    detection_result = _call_4e1(client, worker_spl)
+
+    if detection_result.get("has_violations", False):
+        violations = detection_result.get("violations", [])
+        logger.warning(
+            "[Step 4E.1] Found %d nested BLOCK violations, fixing...",
+            len(violations)
+        )
+        for v in violations:
+            logger.debug(
+                "  - %s inside %s: %s",
+                v.get("inner_block", "?"),
+                v.get("outer_block", "?"),
+                v.get("snippet", "")[:50]
+            )
+
+        logger.info("[Step 4E.2] Fixing nested BLOCK structures...")
+        fixed_spl = _call_4e2(client, worker_spl, violations)
+        return fixed_spl, detection_result
+    else:
+        logger.info("[Step 4E.1] No nested BLOCK violations found")
+        return worker_spl, detection_result
 
 def _call_4f(client: LLMClient, inputs: dict, worker_spl: str) -> str:
     """Generate [EXAMPLES] block."""
@@ -360,17 +470,15 @@ def _prepare_step4_inputs_parallel(
         "has_entities": bool(entities),
     }
     
-    # S4D inputs - from workflow_steps with NETWORK effects (Step 3B)
-    network_steps = [s for s in workflow_steps if "NETWORK" in s.effects]
-    network_steps_json = json.dumps(
-        [_step_to_dict(s) for s in network_steps],
-        indent=2, ensure_ascii=False,
-    )
+    # S4D inputs - from workflow_steps with API action types (Step 3B)
+    api_steps = [s for s in workflow_steps if s.action_type in ["EXTERNAL_API", "EXEC_SCRIPT", "LOCAL_CODE_SNIPPET"]]
+    # Prepare list of individual step dicts for parallel processing
+    api_steps_list = [_step_to_dict(s) for s in api_steps]
     s4d_inputs = {
-        "network_steps_json": network_steps_json,
-        "has_network_steps": bool(network_steps),
+        "tools_list": api_steps_list,
+        "has_tools": bool(api_steps),
     }
-    
+
     # S4E inputs - from workflow_steps, flows (Step 3B)
     workflow_steps_json = json.dumps(
         [_step_to_dict(s) for s in workflow_steps],
@@ -390,35 +498,37 @@ def _prepare_step4_inputs_parallel(
         "workflow_prose": workflow_prose,
         "alternative_flows_json": alternative_flows_json,
         "exception_flows_json": exception_flows_json,
+        "tools_list": api_steps_list,
     }
-    
+
     # S4F inputs - from bundle
     examples_text = bundle.to_text(["EXAMPLES"])
     s4f_inputs = {
         "examples_text": examples_text,
         "has_examples": bool(examples_text.strip()),
     }
-    
+
     return s4a_inputs, s4b_inputs, s4c_inputs, s4d_inputs, s4e_inputs, s4f_inputs
 
 
 def _prepare_step4_inputs_v2(
     bundle: SectionBundle,
     structured_spec: StructuredSpec,
+    tools: list,  # list[ToolSpec]
 ) -> tuple[dict, dict, dict, dict, dict, dict]:
     """
     Pre-compute all inputs for the Step 4 calls.
-    
+
     Returns 6 dictionaries, one for each S4x call, to avoid passing unnecessary
     data to each function.
-    
+
     Dependencies:
-      S4A: bundle[INTENT + NOTES]
-      S4B: bundle[CONSTRAINTS]
-      S4C: structured_spec.entities + omit_files
-      S4D: NETWORK steps from structured_spec.workflow_steps
-      S4E: ALL workflow_steps + flows + symbol_table + apis_spl
-      S4F: bundle[EXAMPLES] + worker_spl
+    S4A: bundle[INTENT + NOTES]
+    S4B: bundle[CONSTRAINTS]
+    S4C: structured_spec.entities + omit_files
+    S4D: tools list for API generation
+    S4E: ALL workflow_steps + flows + symbol_table + apis_spl + tools
+    S4F: bundle[EXAMPLES] + worker_spl
     """
     # S4A inputs
     intent_text = bundle.to_text(["INTENT"])
@@ -445,17 +555,19 @@ def _prepare_step4_inputs_v2(
         "has_entities": bool(structured_spec.entities),
     }
     
-    # S4D inputs
-    network_steps = [s for s in structured_spec.workflow_steps if "NETWORK" in s.effects]
-    network_steps_json = json.dumps(
-        [_step_to_dict(s) for s in network_steps],
-        indent=2, ensure_ascii=False,
-    )
+    # S4D inputs - prepare list of individual tool dicts for parallel processing
+    tools_list = [
+        {"name": t.name, "api_type": t.api_type, "url": t.url,
+         "authentication": t.authentication, "input_schema": t.input_schema,
+         "output_schema": t.output_schema, "description": t.description,
+         "source_text": t.source_text[:500] if len(t.source_text) > 500 else t.source_text}
+        for t in tools
+    ]
     s4d_inputs = {
-        "network_steps_json": network_steps_json,
-        "has_network_steps": bool(network_steps),
+        "tools_list": tools_list,
+        "has_tools": bool(tools),
     }
-    
+
     # S4E inputs
     workflow_steps_json = json.dumps(
         [_step_to_dict(s) for s in structured_spec.workflow_steps],
@@ -470,108 +582,22 @@ def _prepare_step4_inputs_v2(
         [dataclasses.asdict(f) for f in structured_spec.exception_flows],
         indent=2, ensure_ascii=False,
     )
+    # For S4E, pass the tools_list directly (will be converted to JSON when needed)
     s4e_inputs = {
         "workflow_steps_json": workflow_steps_json,
         "workflow_prose": workflow_prose,
         "alternative_flows_json": alternative_flows_json,
         "exception_flows_json": exception_flows_json,
+        "tools_list": tools_list,
     }
-    
+
     # S4F inputs
     examples_text = bundle.to_text(["EXAMPLES"])
     s4f_inputs = {
         "examples_text": examples_text,
         "has_examples": bool(examples_text.strip()),
     }
-    
-    return s4a_inputs, s4b_inputs, s4c_inputs, s4d_inputs, s4e_inputs, s4f_inputs
 
-
-def _prepare_step4_inputs_parallel(
-    bundle: SectionBundle,
-    entities: list[EntitySpec],
-    workflow_steps: list[WorkflowStepSpec],
-    alternative_flows: list[AlternativeFlowSpec],
-    exception_flows: list[ExceptionFlowSpec],
-) -> tuple[dict, dict, dict, dict, dict, dict]:
-    """
-    Pre-compute all inputs for Step 4 calls with parallel execution support.
-    
-    Accepts decomposed inputs from Step 3A (entities) and Step 3B (workflow/flows)
-    to enable maximum parallelism between Step 3 and Step 4.
-    
-    Returns 6 dictionaries for each S4x call.
-    
-    Parallel lines:
-      Line 1: S4C (entities) → symbol_table → S4A + S4B
-      Line 2: S4D (workflow_steps with NETWORK effects)
-      Merge: S4E (needs symbol_table + apis_spl)
-      Final: S4F (needs S4E output)
-    """
-    # S4A inputs - from bundle
-    intent_text = bundle.to_text(["INTENT"])
-    notes_text = bundle.to_text(["NOTES"])
-    s4a_inputs = {
-        "intent_text": intent_text,
-        "notes_text": notes_text,
-    }
-    
-    # S4B inputs - from bundle
-    constraints_text = bundle.to_text(["CONSTRAINTS"])
-    s4b_inputs = {
-        "constraints_text": constraints_text,
-        "has_constraints": bool(constraints_text.strip()),
-    }
-    
-    # S4C inputs - from entities (Step 3A)
-    entities_text = _format_entities_for_s4c(entities)
-    omit_files = [e for e in entities if getattr(e, "from_omit_files", False)]
-    omit_files_text = _format_omit_files_for_s4c(omit_files)
-    s4c_inputs = {
-        "entities_text": entities_text,
-        "omit_files_text": omit_files_text,
-        "has_entities": bool(entities),
-    }
-    
-    # S4D inputs - from workflow_steps with NETWORK effects (Step 3B)
-    network_steps = [s for s in workflow_steps if "NETWORK" in s.effects]
-    network_steps_json = json.dumps(
-        [_step_to_dict(s) for s in network_steps],
-        indent=2, ensure_ascii=False,
-    )
-    s4d_inputs = {
-        "network_steps_json": network_steps_json,
-        "has_network_steps": bool(network_steps),
-    }
-    
-    # S4E inputs - from workflow_steps, flows (Step 3B)
-    workflow_steps_json = json.dumps(
-        [_step_to_dict(s) for s in workflow_steps],
-        indent=2, ensure_ascii=False,
-    )
-    workflow_prose = bundle.to_text(["WORKFLOW"])
-    alternative_flows_json = json.dumps(
-        [dataclasses.asdict(f) for f in alternative_flows],
-        indent=2, ensure_ascii=False,
-    )
-    exception_flows_json = json.dumps(
-        [dataclasses.asdict(f) for f in exception_flows],
-        indent=2, ensure_ascii=False,
-    )
-    s4e_inputs = {
-        "workflow_steps_json": workflow_steps_json,
-        "workflow_prose": workflow_prose,
-        "alternative_flows_json": alternative_flows_json,
-        "exception_flows_json": exception_flows_json,
-    }
-    
-    # S4F inputs - from bundle
-    examples_text = bundle.to_text(["EXAMPLES"])
-    s4f_inputs = {
-        "examples_text": examples_text,
-        "has_examples": bool(examples_text.strip()),
-    }
-    
     return s4a_inputs, s4b_inputs, s4c_inputs, s4d_inputs, s4e_inputs, s4f_inputs
 
 
@@ -579,12 +605,14 @@ def _prepare_step4_inputs_parallel(
 def _prepare_step4_inputs(
     bundle: SectionBundle,
     structured_spec: StructuredSpec,
+    tools: list | None = None,
 ) -> dict:
     """
     Legacy input preparation function.
     Use _prepare_step4_inputs_v2 for the new dependency-driven scheduler.
     """
-    s4a, s4b, s4c, s4d, s4e, s4f = _prepare_step4_inputs_v2(bundle, structured_spec)
+    tools = tools if tools is not None else []
+    s4a, s4b, s4c, s4d, s4e, s4f = _prepare_step4_inputs_v2(bundle, structured_spec, tools)
     return {
         **s4a,
         **s4b,
@@ -652,39 +680,91 @@ def _format_omit_files_for_s4c(omit_files: list[EntitySpec]) -> str:
 
 def _step_to_dict(s: WorkflowStepSpec) -> dict:
     return {
-        "step_id":            s.step_id,
-        "description":        s.description,
-        "prerequisites":      s.prerequisites,
-        "produces":           s.produces,
+        "step_id": s.step_id,
+        "description": s.description,
+        "prerequisites": s.prerequisites,
+        "produces": s.produces,
         "is_validation_gate": s.is_validation_gate,
-        "effects":            s.effects,
-        "tool_hint":          s.tool_hint,
-        "source_text":        s.source_text,
-        "execution_mode":     getattr(s, "execution_mode", "LLM_PROMPT"),
+        "action_type": s.action_type,
+        "tool_hint": s.tool_hint,
+        "source_text": s.source_text,
     }
 
 
 # ── Symbol table ──────────────────────────────────────────────────────────────
 
-_VARIABLE_NAME_RE = re.compile(r'^\s{1,12}"[^"]+"\s+(?:READONLY\s+)?([a-z][a-z0-9_]+):', re.MULTILINE)
-_FILE_NAME_RE     = re.compile(r'^\s{1,12}"[^"]+"\s+([a-z][a-z0-9_]+)\s+<', re.MULTILINE)
+# Regex to match file declarations in DEFINE_FILES
+# Files are defined in two-line format:
+#   "description"
+#   variable_name path : type
+# Where path can be a filename or placeholders like "< >" (with spaces)
+_FILE_NAME_RE = re.compile(
+    r'^\s*"[^"]*"\s*\n\s+([a-z][a-z0-9_]+)\s+[^\n:]*?:',
+    re.MULTILINE | re.IGNORECASE
+)
 
 
 def _extract_symbol_table(block_4c: str) -> dict[str, list[str]]:
     """
     Extract FILES and VARIABLES declared in the DEFINE_VARIABLES/DEFINE_FILES
-    block (4c).  APIS are NOT included — they are passed separately to S4E.
+    block (4c). APIS are NOT included — they are passed separately to S4E.
+    
+    Handles both formats:
+    - [DEFINE_VARIABLES:] ... [END_VARIABLES] [DEFINE_FILES:] ... [END_FILES]
+    - [DEFINE_FILES:] ... [END_FILES] (no variables section)
+    - [DEFINE_VARIABLES:] ... [END_VARIABLES] (no files section)
+    
+    Files are defined in two-line format:
+      "description"
+      variable_name path : type
+    
+    Variables can be in single-line or two-line format:
+      "description" [READONLY] variable_name : type
+      "description"
+      [READONLY] variable_name : type
     """
     table: dict[str, list[str]] = {
         "variables": [],
-        "files":     [],
+        "files": [],
     }
-    if block_4c:
-        parts      = block_4c.split("[END_VARIABLES]")
-        var_block  = parts[0] if len(parts) > 1 else block_4c
-        file_block = parts[1] if len(parts) > 1 else ""
-        table["variables"] = _VARIABLE_NAME_RE.findall(var_block)
-        table["files"]     = _FILE_NAME_RE.findall(file_block)
+    if not block_4c:
+        return table
+    
+    # Extract VARIABLES block if present
+    var_start = block_4c.find("[DEFINE_VARIABLES:]")
+    var_end = block_4c.find("[END_VARIABLES]")
+    
+    if var_start >= 0 and var_end > var_start:
+        var_block = block_4c[var_start:var_end]
+        # Find all variable declarations
+        # Pattern: "description" followed by optional READONLY and variable_name :
+        # Handles both single-line and two-line formats
+        var_matches = re.findall(
+            r'(?:^\s*"[^"]*"(?:\s+READONLY)?\s+([a-z][a-z0-9_]+)\s*:)|'
+            r'(?:^\s*"[^"]*"\s*\n\s*(?:READONLY\s+)?([a-z][a-z0-9_]+)\s*:)',
+            var_block,
+            re.MULTILINE | re.IGNORECASE
+        )
+        # Flatten matches (each match is a tuple from alternation)
+        table["variables"] = [v for match in var_matches for v in match if v]
+    
+    # Extract FILES block if present  
+    file_start = block_4c.find("[DEFINE_FILES:]")
+    file_end = block_4c.find("[END_FILES]")
+    
+    if file_start >= 0 and file_end > file_start:
+        file_block = block_4c[file_start:file_end]
+        # Files are always in two-line format:
+        # "description"
+        # variable_name path : type
+        # Where path can contain spaces (e.g., "< >")
+        file_matches = re.findall(
+            r'^\s*"[^"]*"\s*\n\s+([a-z][a-z0-9_]+)\s+[^\n:]*?:',
+            file_block,
+            re.MULTILINE | re.IGNORECASE
+        )
+        table["files"] = file_matches
+    
     return table
 
 
