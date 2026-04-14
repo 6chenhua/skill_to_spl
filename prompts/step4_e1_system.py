@@ -40,4 +40,7 @@ Respond with JSON only:
 If no violations exist, return:
 
 {"has_violations": false, "violations": []}
+
+## Rules
+- Use 4-space indentation for any code examples or snippets in your response.
 """

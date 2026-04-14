@@ -583,10 +583,10 @@ Do not filter out NETWORK, USER_INPUT, or validation-gate steps.
  
 Step → command mapping (use action_type field):
  
-  action_type == "API_CALL"         → [CALL ApiName WITH {param: value, ...} RESPONSE var: TYPE]
-                                       ApiName must be a name declared in section C (DEFINE_APIS).
-                                       This covers all three kinds: external network services,
-                                       local scripts in scripts/, and library calls (pypdf, etc.).
+action_type in {EXTERNAL_API, EXEC_SCRIPT, LOCAL_CODE_SNIPPET} → [CALL ApiName WITH {param: value, ...} RESPONSE var: TYPE]
+ApiName must be a name declared in section C (DEFINE_APIS).
+This covers all three kinds: external network services,
+local scripts in scripts/, and library calls (pypdf, etc.).
  
   action_type == "CODE_EXEC"        → [COMMAND CODE code_statement RESULT var: TYPE]
                                        The description field contains the code statement

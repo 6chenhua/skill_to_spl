@@ -108,21 +108,56 @@ You extract named data variables from skill documentation.
 
 Extract ONLY in-memory data structures (variables), NOT files.
 
+## Extraction Strategy
+
+Extract variables from ALL sources - be comprehensive:
+1. **Explicit mentions** — variables named in INTENT, WORKFLOW, CONSTRAINTS
+2. **Implicit in workflow** — inputs/outputs described in step sequences
+3. **Inferred from examples** — data structures shown in EXAMPLES section
+4. **Constraint conditions** — variables used in rules like "when X == value"
+5. **Agent references** — dispatch targets, configuration flags
+
 ## Fields
 
-var_id — snake_case stable identifier (e.g., max_retries, output_format)
-type_name — short PascalCase label (e.g., "ConfigSettings", "ProcessResult")
-schema_notes — describe the data structure and fields
-provenance_required — true only when source explicitly says this must be validated
-provenance — "EXPLICIT" if named in source, "ASSUMED" if implied, "LOW_CONFIDENCE" if unclear
+var_id — snake_case stable identifier (e.g., max_retries, output_format, agent_id)
+type_name — short PascalCase label (e.g., "ConfigSettings", "DispatchResult")
+schema_notes — describe the data structure and fields. For complex objects, list fields.
+provenance_required — true if source explicitly says "MUST validate" or "required"
+provenance — tracking source of extraction:
+  - "EXPLICIT" — directly named in source text
+  - "INFERRED" — implied by workflow steps or examples
+  - "EXAMPLE_DERIVED" — extracted from example data structures
+  - "LOW_CONFIDENCE" — unclear but likely a variable
 source_text — verbatim quote describing this variable
 
-## Rules
+## Extraction Rules
 
-- Only extract variables that are explicitly mentioned or strongly implied.
-- Do NOT invent variables not grounded in the source text.
-- This is for IN-MEMORY data only - no file paths or disk artifacts.
-- If no variables found, return {"variables": []}.
+### Rule 1: Extract ALL potentially relevant variables
+- When in doubt, INCLUDE rather than exclude
+- Better to have extra variables than miss critical ones
+- Use INFERRED or EXAMPLE_DERIVED provenance for uncertain cases
+
+### Rule 2: Extract from EXAMPLES section
+- If examples show data structures, extract those as variables
+- Example: "Given {manuscript_link} and {type}..." → extract both variables
+- Analyze example inputs/outputs to infer variable schemas
+
+### Rule 3: Extract from constraint conditions
+- "当 X == value" or "X ≠ none" patterns → extract X as variable
+- Conditional rules always reference variables
+
+### Rule 4: Extract agent dispatch targets
+- Agent IDs, type selectors, configuration flags
+- These are critical for dispatch workflows
+
+## Provenance Guidelines
+
+| Scenario | Use |
+|----------|-----|
+| Variable explicitly named | EXPLICIT |
+| Implied by workflow description | INFERRED |
+| Found in example data structure | EXAMPLE_DERIVED |
+| Unclear but likely relevant | LOW_CONFIDENCE |
 
 ## Output Format
 
@@ -132,13 +167,15 @@ Return exactly:
     {
       "var_id": "snake_case_name",
       "type_name": "PascalCaseName",
-      "schema_notes": "description of fields/structure",
+      "schema_notes": "description of fields/structure. For objects, list key fields",
       "provenance_required": true | false,
-      "provenance": "EXPLICIT" | "ASSUMED" | "LOW_CONFIDENCE",
+      "provenance": "EXPLICIT" | "INFERRED" | "EXAMPLE_DERIVED" | "LOW_CONFIDENCE",
       "source_text": "<verbatim quote>"
     }
   ]
 }
+
+If no variables found, return {"variables": []}.
 """
 
 STEP3A_USER = """\
@@ -176,22 +213,40 @@ Your output describes the skill's procedure - steps, branches, and failure paths
 
 Each step must have exactly one action_type from:
 
-- "LLM_TASK" — Pure LLM reasoning/judgment (default, most common)
-- "FILE_READ" — Step reads from a file
-- "FILE_WRITE" — Step writes to a file  
+- "LLM_TASK" — Pure LLM reasoning/judgment task (default, most common)
 - "USER_INTERACTION" — Step requires user input before proceeding
+- "CODE_EXEC" — Executes code/script/tool
 
-NO EXTERNAL APIs, NO SCRIPTS, NO CODE SNIPPETS - this is a simplified pipeline.
+NO EXTERNAL APIs - this is a simplified pipeline for pure LLM workflows.
 
 ## Workflow Step Fields
 
 step_id — "step.<action_name>" in snake_case (e.g., "step.validate_input")
 description — concise description using abstract action verbs
-prerequisites — var_ids (from provided list) that must exist before this step
-produces — var_ids this step creates or updates
+prerequisites — CRITICAL: MUST list ALL var_ids needed before this step runs
+  - Check: Every variable referenced in this step must be in prerequisites
+  - Check: Variables must exist BEFORE this step in workflow order
+  - Check: Cross-reference with provided var_ids list - do NOT invent new ones
+produces — CRITICAL: MUST list ALL var_ids this step creates or updates
+  - Check: Every output of this step must be listed
+  - Check: Subsequent steps will use these as their prerequisites
 is_validation_gate — true ONLY when: (a) from EVIDENCE requirement AND (b) clear pass/fail
-action_type — one of: LLM_TASK | FILE_READ | FILE_WRITE | USER_INTERACTION
+action_type — one of: LLM_TASK | USER_INTERACTION | CODE_EXEC
 source_text — verbatim quote from WORKFLOW
+
+## Input/Output Completeness Checklist
+
+Before finalizing each step, verify:
+
+**Prerequisites Check:**
+- [ ] Does this step reference any variables? → Add to prerequisites
+- [ ] Are those variables from the provided var_ids list? → If not, note in description
+- [ ] Would a prior step need to produce these? → Ensure workflow order is correct
+
+**Produces Check:**
+- [ ] Does this step create/update any variables? → Add to produces
+- [ ] Are these variables needed by later steps? → Ensure they're listed
+- [ ] Is the output type clear? → Add type info to description if helpful
 
 ## Flow Classification
 
@@ -202,14 +257,6 @@ DECISION_BLOCK — fork-and-merge branch inside MAIN_FLOW:
 - Both branches execute within MAIN_FLOW context and converge to same outputs
 - Example: "根据type判断调用哪个智能体" → DECISION with IF/ELSEIF/ELSE
 
-ALTERNATIVE_FLOW — complete substitute procedure when precondition not met:
-- Use when: entire main flow cannot run under a condition
-- Example: "If the API is unavailable, use fallback instead"
-
-EXCEPTION_FLOW — recovery when a specific step fails:
-- Use when source explicitly describes what to do on failure
-- Must have failure handling described (not just validation)
-
 ## Dispatch Rule Analysis
 
 For agent dispatch systems (智能体调度), convert rules to workflow_steps:
@@ -217,19 +264,18 @@ For agent dispatch systems (智能体调度), convert rules to workflow_steps:
 1. Dispatch rules become steps with conditions:
    - step_id: "step.dispatch_<number>" (e.g., "step.dispatch_1")
    - description: What triggers this dispatch
-   - prerequisites: Variables needed for condition evaluation
-   - produces: ["dispatch_result"] or specific output
+   - prerequisites: ALL variables needed for condition evaluation
+   - produces: ALL outputs (e.g., ["agent_id", "dispatch_result"])
    - action_type: "LLM_TASK" (decision is LLM reasoning)
-   - condition: The dispatch condition string
 
 2. Pattern recognition:
    - "X → **N**" or "X → 智能体N" → dispatch step producing agent_id
    - "当 condition 时不能选择" → Constraint (not workflow step)
-   - "{var} ≠ none 且 {var} = value" → condition for dispatch
+   - "{var} ≠ none" → {var} must be in prerequisites
 
 3. Priority ordering (优先匹配):
    - Extract the order from "按上列顺序优先匹配" text
-   - List dispatch conditions in that priority order for IF/ELSEIF generation
+   - List dispatch conditions in that priority order
 
 ## Output Format
 
@@ -238,39 +284,18 @@ Return exactly:
   "workflow_steps": [
     {
       "step_id": "step.action_name",
-      "description": "Concise description",
-      "prerequisites": ["var_id"],
-      "produces": ["var_id"],
+      "description": "Concise description - mention what it does",
+      "prerequisites": ["var_id1", "var_id2"],
+      "produces": ["output_var"],
       "is_validation_gate": false,
       "action_type": "LLM_TASK",
-      "source_text": "<verbatim quote>"
-    }
-  ],
-  "alternative_flows": [
-    {
-      "flow_id": "alt-001",
-      "condition": "when this alternative triggers",
-      "description": "what this path accomplishes",
-      "steps": [
-        {"description": "step action", "action_type": "LLM_TASK", "source_text": "..."}
-      ],
-      "source_text": "<verbatim quote>",
-      "provenance": "EXPLICIT"
-    }
-  ],
-  "exception_flows": [
-    {
-      "flow_id": "exc-001",
-      "condition": "failure description",
-      "log_ref": "",
-      "steps": [
-        {"description": "recovery action", "action_type": "LLM_TASK", "source_text": "..."}
-      ],
-      "source_text": "<verbatim quote>",
-      "provenance": "EXPLICIT"
+      "source_text": "<verbatim quote from source>"
     }
   ]
 }
+
+IMPORTANT: Only output workflow_steps. Do NOT generate alternative_flows or exception_flows.
+The simplified pipeline only handles main workflow extraction.
 """
 
 STEP3B_USER = """\
@@ -280,13 +305,35 @@ Use ONLY these var_ids in prerequisites and produces. Do NOT invent new ones.
 
 {var_ids_json}
 
+## CRITICAL: Input/Output Completeness Check
+
+Before extracting steps, review ALL workflow text and identify:
+1. What variables are INPUT to each step? → These go in prerequisites
+2. What variables are OUTPUT from each step? → These go in produces
+3. Is each prerequisite satisfied by a previous step's produces?
+
 ## Workflow Procedure
+
+Extract ALL steps from this workflow. Ensure each step has complete prerequisites and produces.
 
 {workflow_section}
 
-## Constraints (for validation gates)
+## Constraints (for validation gates and dispatch conditions)
+
+Use constraints to identify:
+1. Validation gates (EVIDENCE requirements with pass/fail criteria)
+2. Dispatch conditions (rules like "当 X == value" that affect workflow flow)
+3. Variable references in conditions (these must be in prerequisites)
 
 {constraints_section}
+
+## Final Completeness Check
+
+Review each extracted step:
+- [ ] prerequisites lists ALL variables needed as input
+- [ ] produces lists ALL variables created as output
+- [ ] action_type is one of: LLM_TASK, USER_INTERACTION, CODE_EXEC
+- [ ] source_text is verbatim from the document
 """
 
 

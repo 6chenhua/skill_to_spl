@@ -18,6 +18,7 @@ render_* helpers at the bottom of this module.
 from __future__ import annotations
 from prompts.p2_system import v1 as p2_sys
 from prompts.step1_system import v2 as s1_sys
+from prompts.step1_5_system import s1_5_api_v1 as s1_5_api
 from prompts.step3_system import s3_a_v1 as s3_a, s3_b_v3 as s3_b
 from prompts.step4_system import (
     s4_a_v2 as s4_a,
@@ -29,6 +30,7 @@ from prompts.step4_system import (
 )
 from prompts.step4_e1_system import v1 as s4_e1
 from prompts.step4_e2_system import v1 as s4_e2
+from prompts.step0_system import v1 as s0_sys
 
 # ─────────────────────────────────────────────────────────────────────────────
 # P2 — File Role Resolver
@@ -218,6 +220,21 @@ Generate DEFINE_APIS block for these tool specifications:
 For each tool, generate one API_DECLARATION following the rules in the system prompt.
 """
 
+# ── Step 1.5: API Generation (moved from Step 4D) ────────────────────────────────
+
+S1_5_API_SYSTEM = s1_5_api
+
+S1_5_API_USER = """\
+Generate API_DECLARATION for this tool specification:
+
+## Tool Specification (JSON)
+
+{{tool_json}}
+
+Generate exactly ONE API_DECLARATION following the rules in the system prompt.
+Output ONLY the API declaration, without [DEFINE_APIS:] wrapper.
+"""
+
 # ─────────────────────────────────────────────────────────────────────────────
 # S4E — WORKER (updated)
 #
@@ -330,6 +347,26 @@ S4F_USER = """\
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
+# S0 — DEFINE_AGENT Header
+#
+# Generates the DEFINE_AGENT header block that wraps the complete SPL_PROMPT.
+# Runs in parallel with Step 4 sub-steps.
+# ─────────────────────────────────────────────────────────────────────────────
+
+S0_SYSTEM = s0_sys
+
+S0_USER = """\
+## Skill ID
+{{skill_id}}
+
+## INTENT Section
+{{intent_text}}
+
+## NOTES Section
+{{notes_text}}
+"""
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Render helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -405,6 +442,11 @@ def render_s4d_user(tools_json: str) -> str:
     return S4D_USER.replace("{{tools_json}}", tools_json)
 
 
+def render_s1_5_api_user(tool_json: str) -> str:
+    """Render Step 1.5 user prompt for single API generation."""
+    return S1_5_API_USER.replace("{{tool_json}}", tool_json)
+
+
 def render_s4e_user(
     workflow_steps_json: str,
     workflow_prose: str,
@@ -435,4 +477,14 @@ def render_s4f_user(
         S4F_USER
         .replace("{{worker_spl}}", worker_spl)
         .replace("{{examples_text}}", examples_text)
+    )
+
+
+def render_s0_user(skill_id: str, intent_text: str, notes_text: str) -> str:
+    """Render S0 user prompt for DEFINE_AGENT header generation."""
+    return (
+        S0_USER
+        .replace("{{skill_id}}", skill_id)
+        .replace("{{intent_text}}", intent_text)
+        .replace("{{notes_text}}", notes_text)
     )

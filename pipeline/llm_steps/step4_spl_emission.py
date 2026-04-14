@@ -39,6 +39,7 @@ from models.data_models import (
     WorkflowStepSpec,
 )
 from pipeline.llm_client import LLMClient
+from pipeline.spl_formatter import format_spl_indentation
 from prompts import templates
 
 logger = logging.getLogger(__name__)
@@ -132,13 +133,13 @@ def run_step4_spl_emission(
         block_4e = future_4e.result()
 
         block_4f = ""
-        if s4f_inputs["has_examples"]:
-            logger.info("[Step 4] Phase 5: Generating S4F (examples)")
-            block_4f = _call_4f(client, s4f_inputs, block_4e)
+    if s4f_inputs["has_examples"]:
+        logger.info("[Step 4] Phase 5: Generating S4F (examples)")
+        block_4f = _call_4f(client, s4f_inputs, block_4e)
 
     # ── Assemble final SPL ────────────────────────────────────────────────────
     spl_text = _assemble_spl(
-        skill_id, block_4a, block_4b, block_4c, block_4d, block_4e, block_4f
+        skill_id, "", block_4a, block_4b, block_4c, block_4d, block_4e, block_4f
     )
     review_summary = _build_review_summary()
     clause_counts = {}
@@ -242,7 +243,7 @@ def run_step4_spl_emission_parallel(
 
     # ── Assemble final SPL ────────────────────────────────────────────────────
     spl_text = _assemble_spl(
-        skill_id, block_4a, block_4b, block_4c, block_4d, block_4e, block_4f
+        skill_id, "", block_4a, block_4b, block_4c, block_4d, block_4e, block_4f
     )
     review_summary = _build_review_summary()
     clause_counts = {}
@@ -257,32 +258,23 @@ def run_step4_spl_emission_parallel(
 
 
 # ── Individual step call functions ────────────────────────────────────────────
+# Note: Both sync and async versions are provided for backward compatibility.
+# New code should use the async versions.
 
-def _call_4c(client: LLMClient, inputs: dict) -> str:
+async def _call_4c_async(client: LLMClient, inputs: dict) -> str:
     """Generate DEFINE_VARIABLES + DEFINE_FILES block."""
     if not inputs["has_entities"]:
         return ""
-    combined = inputs["entities_text"]
-    if inputs["omit_files_text"].strip() and inputs["omit_files_text"] != "(No omit files found)":
-        combined += "\n\n" + inputs["omit_files_text"]
-    return client.call(
+    return await client.async_call(
         "step4c_variables_files",
         templates.S4C_SYSTEM,
         templates.render_s4c_user(inputs["entities_text"], inputs["omit_files_text"]),
     )
 
-def _call_4d(client: LLMClient, tool: dict) -> str:
-    """Generate DEFINE_APIS block for a single tool."""
-    tool_json = json.dumps(tool, indent=2, ensure_ascii=False)
-    return client.call(
-        "step4d_api_single",
-        templates.S4D_SYSTEM,
-        templates.render_s4d_user(tool_json),
-    )
 
-def _call_4a(client: LLMClient, inputs: dict, symbol_table_text: str) -> str:
+async def _call_4a_async(client: LLMClient, inputs: dict, symbol_table_text: str) -> str:
     """Generate PERSONA / AUDIENCE / CONCEPTS block."""
-    return client.call(
+    return await client.async_call(
         "step4a_persona",
         templates.S4A_SYSTEM,
         templates.render_s4a_user(
@@ -292,11 +284,12 @@ def _call_4a(client: LLMClient, inputs: dict, symbol_table_text: str) -> str:
         ),
     )
 
-def _call_4b(client: LLMClient, inputs: dict, symbol_table_text: str) -> str:
+
+async def _call_4b_async(client: LLMClient, inputs: dict, symbol_table_text: str) -> str:
     """Generate DEFINE_CONSTRAINTS block."""
     if not inputs["has_constraints"]:
         return ""
-    return client.call(
+    return await client.async_call(
         "step4b_constraints",
         templates.S4B_SYSTEM,
         templates.render_s4b_user(
@@ -305,7 +298,8 @@ def _call_4b(client: LLMClient, inputs: dict, symbol_table_text: str) -> str:
         ),
     )
 
-def _call_4e(client: LLMClient, inputs: dict, symbol_table_text: str, apis_spl: str) -> str:
+
+async def _call_4e_async(client: LLMClient, inputs: dict, symbol_table_text: str, apis_spl: str) -> str:
     """Generate WORKER block (MAIN_FLOW + ALTERNATIVE_FLOW + EXCEPTION_FLOW)."""
     # Convert tools_list to JSON string for S4E
     tools_list = inputs.get("tools_list", [])
@@ -319,10 +313,10 @@ def _call_4e(client: LLMClient, inputs: dict, symbol_table_text: str, apis_spl: 
         apis_spl=apis_spl,
         tools_json=tools_json_str,
     )
-    return client.call(step_name="step4e_worker", system=s4e_system, user=s4e_user)
+    return await client.async_call(step_name="step4e_worker", system=s4e_system, user=s4e_user)
 
 
-def _call_4e1(client: LLMClient, worker_spl: str) -> dict:
+async def _call_4e1_async(client: LLMClient, worker_spl: str) -> dict:
     """Detect illegal nested BLOCK structures in WORKER SPL.
 
     Returns a dict with:
@@ -330,7 +324,7 @@ def _call_4e1(client: LLMClient, worker_spl: str) -> dict:
     - violations: list of violation dicts
     """
     s4e1_user = templates.render_s4e1_user(worker_spl=worker_spl)
-    response = client.call(
+    response = await client.async_call(
         step_name="step4e1_nesting_detection",
         system=templates.S4E1_SYSTEM,
         user=s4e1_user,
@@ -357,7 +351,7 @@ def _call_4e1(client: LLMClient, worker_spl: str) -> dict:
         return {"has_violations": False, "violations": []}
 
 
-def _call_4e2(client: LLMClient, worker_spl: str, violations: list) -> str:
+async def _call_4e2_async(client: LLMClient, worker_spl: str, violations: list) -> str:
     """Fix illegal nested BLOCK structures by flattening.
 
     Returns the corrected WORKER SPL text.
@@ -367,14 +361,14 @@ def _call_4e2(client: LLMClient, worker_spl: str, violations: list) -> str:
         worker_spl=worker_spl,
         violations_json=violations_json,
     )
-    return client.call(
+    return await client.async_call(
         step_name="step4e2_nesting_fix",
         system=templates.S4E2_SYSTEM,
         user=s4e2_user,
     )
 
 
-def validate_and_fix_worker_nesting(client: LLMClient, worker_spl: str) -> tuple[str, dict]:
+async def validate_and_fix_worker_nesting_async(client: LLMClient, worker_spl: str) -> tuple[str, dict]:
     """Validate and fix nested BLOCK structures in WORKER SPL.
 
     Args:
@@ -387,7 +381,7 @@ def validate_and_fix_worker_nesting(client: LLMClient, worker_spl: str) -> tuple
         - detection_result: The full S4E1 detection result dict
     """
     logger.info("[Step 4E.1] Checking for illegal BLOCK nesting...")
-    detection_result = _call_4e1(client, worker_spl)
+    detection_result = await _call_4e1_async(client, worker_spl)
 
     if detection_result.get("has_violations", False):
         violations = detection_result.get("violations", [])
@@ -397,18 +391,114 @@ def validate_and_fix_worker_nesting(client: LLMClient, worker_spl: str) -> tuple
         )
         for v in violations:
             logger.debug(
-                "  - %s inside %s: %s",
+                " - %s inside %s: %s",
                 v.get("inner_block", "?"),
                 v.get("outer_block", "?"),
                 v.get("snippet", "")[:50]
             )
 
         logger.info("[Step 4E.2] Fixing nested BLOCK structures...")
-        fixed_spl = _call_4e2(client, worker_spl, violations)
+        fixed_spl = await _call_4e2_async(client, worker_spl, violations)
         return fixed_spl, detection_result
     else:
         logger.info("[Step 4E.1] No nested BLOCK violations found")
         return worker_spl, detection_result
+
+
+async def _call_4f_async(client: LLMClient, inputs: dict, worker_spl: str) -> str:
+    """Generate [EXAMPLES] block."""
+    return await client.async_call(
+        "step4f_examples",
+        templates.S4F_SYSTEM,
+        templates.render_s4f_user(
+            worker_spl=worker_spl,
+            examples_text=inputs["examples_text"],
+        ),
+    )
+
+
+async def _call_s0_async(client: LLMClient, skill_id: str, intent_text: str, notes_text: str) -> str:
+    """Generate DEFINE_AGENT header block.
+
+    Args:
+        client: LLM client for making calls
+        skill_id: The skill identifier
+        intent_text: The INTENT section text
+        notes_text: The NOTES section text
+
+    Returns:
+        The DEFINE_AGENT header line (e.g., "[DEFINE_AGENT: AgentName \"description\"]")
+    """
+    return await client.async_call(
+        "step0_define_agent",
+        templates.S0_SYSTEM,
+        templates.render_s0_user(skill_id, intent_text, notes_text),
+    )
+
+
+# Legacy sync functions (kept for backward compatibility)
+def _call_4d(client: LLMClient, tool: dict) -> str:
+    """Generate DEFINE_APIS block for a single tool.
+
+    DEPRECATED: API generation moved to Step 1.5.
+    This function is kept for backward compatibility.
+    """
+    return ""
+
+
+def _call_4c(client: LLMClient, inputs: dict) -> str:
+    """Generate DEFINE_VARIABLES + DEFINE_FILES block."""
+    if not inputs["has_entities"]:
+        return ""
+    return client.call(
+        "step4c_variables_files",
+        templates.S4C_SYSTEM,
+        templates.render_s4c_user(inputs["entities_text"], inputs["omit_files_text"]),
+    )
+
+
+def _call_4a(client: LLMClient, inputs: dict, symbol_table_text: str) -> str:
+    """Generate PERSONA / AUDIENCE / CONCEPTS block."""
+    return client.call(
+        "step4a_persona",
+        templates.S4A_SYSTEM,
+        templates.render_s4a_user(
+            intent_text=inputs["intent_text"],
+            notes_text=inputs["notes_text"],
+            symbol_table=symbol_table_text,
+        ),
+    )
+
+
+def _call_4b(client: LLMClient, inputs: dict, symbol_table_text: str) -> str:
+    """Generate DEFINE_CONSTRAINTS block."""
+    if not inputs["has_constraints"]:
+        return ""
+    return client.call(
+        "step4b_constraints",
+        templates.S4B_SYSTEM,
+        templates.render_s4b_user(
+            constraints_text=inputs["constraints_text"],
+            symbol_table=symbol_table_text,
+        ),
+    )
+
+
+def _call_4e(client: LLMClient, inputs: dict, symbol_table_text: str, apis_spl: str) -> str:
+    """Generate WORKER block (MAIN_FLOW + ALTERNATIVE_FLOW + EXCEPTION_FLOW)."""
+    tools_list = inputs.get("tools_list", [])
+    tools_json_str = json.dumps(tools_list, indent=2, ensure_ascii=False) if tools_list else "[]"
+    s4e_system, s4e_user = templates.render_s4e_user(
+        workflow_steps_json=inputs["workflow_steps_json"],
+        workflow_prose=inputs["workflow_prose"],
+        alternative_flows_json=inputs["alternative_flows_json"],
+        exception_flows_json=inputs["exception_flows_json"],
+        symbol_table=symbol_table_text,
+        apis_spl=apis_spl,
+        tools_json=tools_json_str,
+    )
+    return client.call(step_name="step4e_worker", system=s4e_system, user=s4e_user)
+
 
 def _call_4f(client: LLMClient, inputs: dict, worker_spl: str) -> str:
     """Generate [EXAMPLES] block."""
@@ -419,6 +509,95 @@ def _call_4f(client: LLMClient, inputs: dict, worker_spl: str) -> str:
             worker_spl=worker_spl,
             examples_text=inputs["examples_text"],
         ),
+    )
+
+
+def validate_and_fix_worker_nesting(client: LLMClient, worker_spl: str) -> tuple[str, dict]:
+    """Validate and fix nested BLOCK structures in WORKER SPL (sync version).
+
+    Args:
+        client: LLM client for making calls
+        worker_spl: The generated WORKER SPL text
+
+    Returns:
+        Tuple of (corrected_worker_spl, detection_result)
+        - corrected_worker_spl: The fixed SPL (or original if no violations)
+        - detection_result: The full S4E1 detection result dict
+    """
+    logger.info("[Step 4E.1] Checking for illegal BLOCK nesting...")
+    
+    s4e1_user = templates.render_s4e1_user(worker_spl=worker_spl)
+    response = client.call(
+        step_name="step4e1_nesting_detection",
+        system=templates.S4E1_SYSTEM,
+        user=s4e1_user,
+    )
+
+    # Parse JSON response (handle markdown code blocks)
+    try:
+        cleaned = response.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.split("\n")
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            cleaned = "\n".join(lines).strip()
+
+        detection_result = json.loads(cleaned)
+    except json.JSONDecodeError as e:
+        logger.warning("[Step 4E1] Failed to parse JSON response: %s", e)
+        logger.debug("[Step 4E1] Raw response:\n%s", response[:500])
+        detection_result = {"has_violations": False, "violations": []}
+
+    if detection_result.get("has_violations", False):
+        violations = detection_result.get("violations", [])
+        logger.warning(
+            "[Step 4E.1] Found %d nested BLOCK violations, fixing...",
+            len(violations)
+        )
+        for v in violations:
+            logger.debug(
+                " - %s inside %s: %s",
+                v.get("inner_block", "?"),
+                v.get("outer_block", "?"),
+                v.get("snippet", "")[:50]
+            )
+
+        logger.info("[Step 4E.2] Fixing nested BLOCK structures...")
+        
+        violations_json = json.dumps(violations, indent=2, ensure_ascii=False)
+        s4e2_user = templates.render_s4e2_user(
+            worker_spl=worker_spl,
+            violations_json=violations_json,
+        )
+        fixed_spl = client.call(
+            step_name="step4e2_nesting_fix",
+            system=templates.S4E2_SYSTEM,
+            user=s4e2_user,
+        )
+        return fixed_spl, detection_result
+    else:
+        logger.info("[Step 4E.1] No nested BLOCK violations found")
+        return worker_spl, detection_result
+
+
+def _call_s0(client: LLMClient, skill_id: str, intent_text: str, notes_text: str) -> str:
+    """Generate DEFINE_AGENT header block.
+
+    Args:
+        client: LLM client for making calls
+        skill_id: The skill identifier
+        intent_text: The INTENT section text
+        notes_text: The NOTES section text
+
+    Returns:
+        The DEFINE_AGENT header line (e.g., "[DEFINE_AGENT: AgentName \"description\"]")
+    """
+    return client.call(
+        "step0_define_agent",
+        templates.S0_SYSTEM,
+        templates.render_s0_user(skill_id, intent_text, notes_text),
     )
 
 
@@ -790,6 +969,7 @@ def _format_symbol_table(symbol_table: dict[str, list[str]]) -> str:
 
 def _assemble_spl(
     skill_id: str,
+    define_agent_header: str,
     block_4a: str,
     block_4b: str,
     block_4c: str,
@@ -798,16 +978,16 @@ def _assemble_spl(
     block_4f: str,
 ) -> str:
     """
-    Concatenate all blocks in canonical SPL order.
+    Concatenate all blocks in canonical SPL order, wrapping with DEFINE_AGENT.
+
+    Final structure:
+    [DEFINE_AGENT: AGENT_NAME "description"]
+    # SPL_PROMPT content (blocks 4a-4f)
+    [END_AGENT]
 
     block_4f ([EXAMPLES] block) is inserted INSIDE the WORKER, before
-    [END_WORKER].  If [END_WORKER] is not found, 4f is appended separately.
+    [END_WORKER]. If [END_WORKER] is not found, 4f is appended separately.
     """
-    header = (
-        f"# SPL specification — {skill_id}\n"
-        f"# Generated by skill-to-cnlp pipeline\n"
-    )
-
     # Insert S4F [EXAMPLES] block into the WORKER before [END_WORKER]
     worker_block = _strip_fences(block_4e.strip())
     if block_4f:
@@ -821,15 +1001,43 @@ def _assemble_spl(
         else:
             worker_block = worker_block + "\n\n" + examples_block
 
-    blocks = [header]
+    # Assemble SPL_PROMPT content (everything inside DEFINE_AGENT)
+    spl_prompt_blocks = []
     for raw_block in (block_4a, block_4b, block_4c, block_4d):
         cleaned = _strip_fences(raw_block.strip())
         if cleaned:
-            blocks.append(cleaned)
+            spl_prompt_blocks.append(cleaned)
     if worker_block:
-        blocks.append(worker_block)
+        spl_prompt_blocks.append(worker_block)
 
-    return "\n\n".join(blocks)
+    spl_prompt_content = "\n\n".join(spl_prompt_blocks)
+
+    # Wrap with DEFINE_AGENT header and footer
+    header = f"# SPL specification — {skill_id}\n# Generated by skill-to-cnlp pipeline\n\n"
+
+    # Use the generated DEFINE_AGENT header (or create a default one)
+    if define_agent_header and define_agent_header.strip():
+        define_agent_line = _strip_fences(define_agent_header.strip())
+    else:
+        # Fallback: generate a simple DEFINE_AGENT header
+        agent_name = _to_pascal_case(skill_id)
+        define_agent_line = f"[DEFINE_AGENT: {agent_name}]"
+
+    final_spl = header + define_agent_line + "\n\n" + spl_prompt_content + "\n\n[END_AGENT]"
+
+    # 格式化SPL缩进，确保使用标准4空格缩进
+    final_spl = format_spl_indentation(final_spl)
+
+    return final_spl
+
+
+def _to_pascal_case(text: str) -> str:
+    """Convert a skill_id to PascalCase agent name."""
+    import re
+    # Remove non-alphanumeric characters and split into words
+    words = re.split(r'[^a-zA-Z0-9]+', text)
+    # Capitalize each word and join
+    return ''.join(word.capitalize() for word in words if word)
 
 
 def _strip_fences(text: str) -> str:

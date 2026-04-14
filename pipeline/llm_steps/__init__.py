@@ -22,6 +22,28 @@ from pipeline.llm_steps.step3_interface_inference import (
 from pipeline.llm_steps.step4_spl_emission import (
     run_step4_spl_emission,
     run_step4_spl_emission_parallel,
+    # Async versions
+    _call_4c_async,
+    _call_4a_async,
+    _call_4b_async,
+    _call_4e_async,
+    _call_4e1_async,
+    _call_4e2_async,
+    _call_4f_async,
+    _call_s0_async,
+    validate_and_fix_worker_nesting_async,
+    # Legacy sync versions
+    _call_4c,
+    _call_4a,
+    _call_4b,
+    _call_4e,
+    _call_4f,
+    _call_s0,
+    _extract_symbol_table,
+    _format_symbol_table,
+    _prepare_step4_inputs_parallel,
+    _assemble_spl,
+    _build_review_summary,
 )
 
 __all__ = [

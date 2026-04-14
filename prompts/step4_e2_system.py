@@ -67,5 +67,6 @@ Flattening rules:
 ## Rules
 
 - Output ONLY the corrected [DEFINE_WORKER:] ... [END_WORKER] block.
+- Use 4-space indentation throughout.
 - No prose, no markdown fences, no explanation.
 """
