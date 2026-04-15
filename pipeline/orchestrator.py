@@ -26,7 +26,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
 
-from pipeline.llm_client import LLMClient, LLMConfig, SessionUsage
+from pipeline.llm_client import LLMClient, LLMConfig, SessionUsage, StepLLMConfig
 from models.data_models import PipelineResult, StructuredSpec
 from pipeline.llm_steps import (
     run_step1_structure_extraction,
@@ -61,28 +61,32 @@ class PipelineConfig:
     Configuration for a single pipeline run.
 
     Args:
-        skill_root:          Path to the skill directory (must contain SKILL.md).
-        output_dir:          Where to write intermediate and final outputs.
-                             Defaults to <skill_root>/.cnlp_output/
-        llm_config:          LLM model and retry settings.
-        save_checkpoints:    If True, save each stage output as JSON to output_dir.
-        resume_from:         If set, load checkpoints up to (but not including) this
-                             stage and resume from there. Useful for reruns after
-                             prompt changes.
-                             Values: "p2" | "step1" | "step3" | "step4"
+        skill_root: Path to the skill directory (must contain SKILL.md).
+        output_dir: Where to write intermediate and final outputs.
+            Defaults to <skill_root>/.cnlp_output/
+        llm_config: LLM model and retry settings (used for steps without overrides).
+        step_llm_config: Optional per-step model overrides. Allows different
+            steps to use different models.
+        save_checkpoints: If True, save each stage output as JSON to output_dir.
+        resume_from: If set, load checkpoints up to (but not including) this
+            stage and resume from there. Useful for reruns after
+            prompt changes.
+            Values: "p2" | "step1" | "step3" | "step4"
     """
 
     def __init__(
-            self,
-            skill_root: str,
-            output_dir: Optional[str] = None,
-            llm_config: Optional[LLMConfig] = None,
-            save_checkpoints: bool = True,
-            resume_from: Optional[str] = None,
+        self,
+        skill_root: str,
+        output_dir: Optional[str] = None,
+        llm_config: Optional[LLMConfig] = None,
+        step_llm_config: Optional[StepLLMConfig] = None,
+        save_checkpoints: bool = True,
+        resume_from: Optional[str] = None,
     ):
         self.skill_root = skill_root
         self.output_dir = output_dir or str(Path(skill_root) / ".cnlp_output")
         self.llm_config = llm_config or LLMConfig()
+        self.step_llm_config = step_llm_config
         self.save_checkpoints = save_checkpoints
         self.resume_from = resume_from
 
@@ -126,16 +130,25 @@ class _Checkpointer:
 def _to_jsonable(obj: object) -> object:
     """Recursively convert dataclasses / enums to JSON-serializable objects."""
     if hasattr(obj, "__dataclass_fields__"):
-        return {k: _to_jsonable(v) for k, v in asdict(obj).items()}  # type: ignore[arg-type]
+        return {k: _to_jsonable(v) for k, v in asdict(obj).items()} # type: ignore[arg-type]
     if isinstance(obj, list):
         return [_to_jsonable(i) for i in obj]
     if isinstance(obj, dict):
         return {k: _to_jsonable(v) for k, v in obj.items()}
-    if hasattr(obj, "value"):  # Enums
+    if hasattr(obj, "value"): # Enums
         return obj.value
     return obj
 
 
+def _step_model(config: PipelineConfig, step_name: str) -> str | None:
+    """Look up the model for a given step name, or None to use the default."""
+    if config.step_llm_config is not None:
+        return config.step_llm_config.get_model(step_name, config.llm_config.model)
+    return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main pipeline runner
 # ─────────────────────────────────────────────────────────────────────────────
 # Main pipeline runner
 # ─────────────────────────────────────────────────────────────────────────────
@@ -179,7 +192,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
 
     # ── Step 1: Structure Extraction (LLM) ───────────────────────────────────
     logger.info("[Step 1] extracting structure...")
-    bundle, step1_network_apis = run_step1_structure_extraction(package=package, client=client)
+    bundle, step1_network_apis = run_step1_structure_extraction(package=package, client=client, model=_step_model(config, "step1_structure_extraction"))
     ckpt.save("step1_bundle", bundle)
 
     # Merge network APIs from Step 1 into package.tools
@@ -193,6 +206,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
         tools=package.tools,
         client=client,
         max_workers=4,
+        model=_step_model(config, "step1_5_api_generation"),
     )
     ckpt.save("step1_5_api_table", {
         "api_count": len(api_table.apis),
@@ -214,7 +228,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
     # Phase 1: Step 3A (must complete first)
     
     logger.info("[Step 3A] extracting entities...")
-    entities = run_step3a_entity_extraction(bundle=bundle, client=client)
+    entities = run_step3a_entity_extraction(bundle=bundle, client=client, model=_step_model(config, "step3a_entity_extraction"))
 
     # Phase 2: Parallel lines
     # Line 1: Step 3B (workflow analysis) + S4D (APIs)
@@ -230,6 +244,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
             entity_ids=entity_ids,
             tools=package.tools,
             client=client,
+            model=_step_model(config, "step3b_workflow_analysis"),
         )
         
         # Line 2: S4C (needs entities from 3A)
@@ -240,7 +255,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
             bundle, entities, [], [], []  # workflow/flows will be filled later
         )
         
-        future_4c = phase2_pool.submit(_call_4c, client, s4c_in)
+        future_4c = phase2_pool.submit(_call_4c, client, s4c_in, model=_step_model(config, "step4c_variables_files"))
 
         # Wait for both lines to complete
         structured_spec_partial = future_3b.result() # Has workflow_steps, flows, but empty entities
@@ -281,13 +296,13 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
 
     with ThreadPoolExecutor(max_workers=3) as phase3_pool:
         # Line 2 continued: S4A and S4B (parallel, only need symbol_table)
-        future_4a = phase3_pool.submit(_call_4a, client, s4a_inputs, symbol_table_text)
-        future_4b = phase3_pool.submit(_call_4b, client, s4b_inputs, symbol_table_text)
+        future_4a = phase3_pool.submit(_call_4a, client, s4a_inputs, symbol_table_text, model=_step_model(config, "step4a_persona"))
+        future_4b = phase3_pool.submit(_call_4b, client, s4b_inputs, symbol_table_text, model=_step_model(config, "step4b_constraints"))
 
         # S0: Generate DEFINE_AGENT header (parallel, only needs bundle)
         intent_text = bundle.to_text(["INTENT"])
         notes_text = bundle.to_text(["NOTES"])
-        future_s0 = phase3_pool.submit(_call_s0, client, graph.skill_id, intent_text, notes_text)
+        future_s0 = phase3_pool.submit(_call_s0, client, graph.skill_id, intent_text, notes_text, model=_step_model(config, "step0_define_agent"))
 
         # Collect S4A, S4B results
         block_4a = future_4a.result()
@@ -308,11 +323,11 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
     
         # Phase 4: S4E (merge point - needs symbol_table from Line 2 and apis_spl from Line 1)
         logger.info("[Step 4] Phase 4: S4E (worker)...")
-        block_4e_original = _call_4e(client, s4e_inputs, symbol_table_text, block_4d)
+        block_4e_original = _call_4e(client, s4e_inputs, symbol_table_text, block_4d, model=_step_model(config, "step4e_worker"))
         ckpt.save("step4e_worker_original", {"worker_spl": block_4e_original})
 
         # Phase 4.5: S4E1/S4E2 - Validate and fix nested BLOCK structures
-        block_4e, nesting_result = validate_and_fix_worker_nesting(client, block_4e_original)
+        block_4e, nesting_result = validate_and_fix_worker_nesting(client, block_4e_original, model=_step_model(config, "step4e1_nesting_fix"))
         
         # Save S4E1 detection result
         ckpt.save("step4e1_nesting_detection", nesting_result)
@@ -333,7 +348,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
         block_4f = ""
         if s4f_inputs["has_examples"]:
             logger.info("[Step 4] Phase 5: S4F (examples)...")
-            block_4f = _call_4f(client, s4f_inputs, block_4e)
+            block_4f = _call_4f(client, s4f_inputs, block_4e, model=_step_model(config, "step4f_examples"))
             # Save S4F output (examples)
             ckpt.save("step4f_examples", {"examples_spl": block_4f})
     

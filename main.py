@@ -4,6 +4,8 @@ import asyncio
 import sys
 import os
 
+from examples.step4_substeps_example import step_config
+
 # Windows asyncio 修复：禁止 ProactorEventLoop 警告
 if sys.platform == 'win32':
     # 设置环境变量来禁用 asyncio 警告
@@ -22,7 +24,7 @@ if sys.platform == 'win32':
     except Exception:
         pass
 
-from pipeline.llm_client import LLMConfig
+from pipeline.llm_client import LLMConfig, StepLLMConfig
 from pipeline.orchestrator import run_pipeline, PipelineConfig
 import logging
 
@@ -73,10 +75,48 @@ if __name__ == '__main__':
         max_tokens=16000,
     )
 
+    tep_config = StepLLMConfig(
+        step_models={
+            # === Pre-steps ===
+            "step1_structure_extraction": "gpt-4o-mini",
+            "step1_5_api_generation": "gpt-4o-mini",
+
+            # === Step 3 ===
+            "step3a_entity_extraction": "gpt-4o",
+            "step3b_workflow_analysis": "gpt-4o",
+
+            # === Step 4 Substeps ===
+            # S0: Agent header - 简单，用便宜模型
+            "step0_define_agent": "gpt-4o-mini",
+
+            # S4A: Persona - 需要理解 skill 意图
+            "step4a_persona": "gpt-4o",
+
+            # S4B: Constraints - 需要准确理解约束
+            "step4b_constraints": "gpt-4o",
+
+            # S4C: Variables/Files - 格式转换，较简单
+            "step4c_variables_files": "gpt-4o-mini",
+
+            # S4E: Worker - **最关键**，生成工作流逻辑
+            "step4e_worker": "gpt-4-turbo",  # 用最强模型
+
+            # S4E1: Nesting Detection - 检测嵌套问题
+            "step4e1_nesting_detection": "gpt-4o-mini",
+
+            # S4E2: Nesting Fix - 修复嵌套问题
+            "step4e2_nesting_fix": "gpt-4o",
+
+            # S4F: Examples - 生成示例
+            "step4f_examples": "gpt-4o",
+        }
+    )
+
     config = PipelineConfig(
         skill_root=f'skills/{skill}',
         output_dir=output_dir,
         llm_config=llm_config,
+        step_llm_config=step_config,
         # capability_profile=capability_profile,
         save_checkpoints=True,
     )

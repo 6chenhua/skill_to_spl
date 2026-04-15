@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Optional
 
 from models.data_models import (
     AlternativeFlowSpec,
@@ -49,6 +50,7 @@ logger = logging.getLogger(__name__)
 def run_step3a_entity_extraction(
     bundle: SectionBundle,
     client: LLMClient,
+    model: Optional[str] = None,
 ) -> list[EntitySpec]:
     """
     Step 3A: Extract named data entities.
@@ -57,10 +59,15 @@ def run_step3a_entity_extraction(
     workflow context (e.g., "produces evaluation_suite") are not missed.
 
     Field ownership:
-      LLM sets:   entity_id, kind, type_name, schema_notes,
-                  provenance_required, file_path, provenance, source_text
-      Code sets:  is_file = (kind == "Artifact")   — derived here
-                  from_omit_files = False           — P3 assembler overwrites
+    LLM sets: entity_id, kind, type_name, schema_notes,
+              provenance_required, file_path, provenance, source_text
+    Code sets: is_file = (kind == "Artifact") — derived here
+               from_omit_files = False — P3 assembler overwrites
+
+    Args:
+        bundle: SectionBundle with ARTIFACTS, WORKFLOW, EXAMPLES sections.
+        client: LLM client for making API calls.
+        model: Optional model override. If None, uses client's default model.
     """
     user_prompt = templates.render_step3a_user(
         artifacts_section=bundle.to_text(["ARTIFACTS"]),
@@ -72,6 +79,7 @@ def run_step3a_entity_extraction(
         step_name="step3a_entity_extraction",
         system=templates.STEP3A_SYSTEM,
         user=user_prompt,
+        model=model,
     )
 
     entities = _parse_entities(raw.get("entities", []))
@@ -84,18 +92,26 @@ def run_step3b_workflow_analysis(
     entity_ids: list[str],
     tools: list,  # list[ToolSpec] - available tools for reference
     client: LLMClient,
+    model: Optional[str] = None,
 ) -> StructuredSpec:
     """
     Step 3B: Extract workflow steps, alternative/exception flows.
 
     entity_ids from Step 3A constrain prerequisites/produces so the LLM
     cannot invent entity names.
-    
+
     tools provides the list of available APIs (SCRIPT, CODE_SNIPPET, NETWORK_API)
     for tool_hint matching.
 
     Steps requiring user input have execution_mode="USER_INPUT".
     Returns a StructuredSpec with entities=[] (filled by the caller).
+
+    Args:
+        bundle: SectionBundle with WORKFLOW, TOOLS, EVIDENCE sections.
+        entity_ids: List of entity IDs from Step 3A.
+        tools: Available tools for reference.
+        client: LLM client for making API calls.
+        model: Optional model override. If None, uses client's default model.
     """
     # Format available tools for the prompt
     tools_info = []
@@ -107,9 +123,9 @@ def run_step3b_workflow_analysis(
             "input_schema": tool.input_schema,
             "output_schema": tool.output_schema,
         })
-    
+
     available_tools_json = json.dumps(tools_info, indent=2, ensure_ascii=False)
-    
+
     user_prompt = templates.render_step3b_user(
         entity_ids_json=json.dumps(entity_ids, indent=2, ensure_ascii=False),
         workflow_section=bundle.to_text(["WORKFLOW"]),
@@ -122,6 +138,7 @@ def run_step3b_workflow_analysis(
         step_name="step3b_workflow_analysis",
         system=templates.STEP3B_SYSTEM,
         user=user_prompt,
+        model=model,
     )
 
     spec = _parse_step3b_result(raw)
@@ -142,18 +159,26 @@ def run_step3_structured_extraction(
     bundle: SectionBundle,
     client: LLMClient,
     tools: list | None = None,
+    model: Optional[str] = None,
 ) -> StructuredSpec:
     """
     Combined Step 3A + 3B. This is the function the orchestrator calls.
     classified_clauses is accepted but not used (see module docstring).
+
+    Args:
+        bundle: SectionBundle with all sections.
+        client: LLM client for making API calls.
+        tools: Available tools for reference.
+        model: Optional model override. If None, uses client's default model.
     """
-    entities = run_step3a_entity_extraction(bundle, client)
+    entities = run_step3a_entity_extraction(bundle, client, model=model)
 
     partial = run_step3b_workflow_analysis(
         bundle=bundle,
         entity_ids=[e.entity_id for e in entities],
         tools=tools or [],
         client=client,
+        model=model,
     )
 
     return StructuredSpec(
@@ -168,8 +193,9 @@ def run_step3_structured_extraction(
 def run_step3_interface_inference(
     bundle: SectionBundle,
     client: LLMClient,
+    model: Optional[str] = None,
 ) -> StructuredSpec:
-    return run_step3_structured_extraction(bundle, client)
+    return run_step3_structured_extraction(bundle, client, model=model)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -40,10 +40,24 @@ class LLMConfig:
     api_key: str = "sk-V0s4xmnT70wbwPPe160dBaCc96A74fB9Ae850fFc6dE6136b"
     model: str = "gpt-4o"
     max_tokens: int = 8192
-    temperature: float = 0.0  # deterministic for pipeline steps
+    temperature: float = 0.0 # deterministic for pipeline steps
     max_retries: int = 3
-    retry_base_delay: float = 2.0  # seconds; doubles on each retry
-    timeout: float = 120.0  # seconds per request
+    retry_base_delay: float = 2.0 # seconds; doubles on each retry
+    timeout: float = 120.0 # seconds per request
+
+
+@dataclass
+class StepLLMConfig:
+    """Configuration for per-step LLM model overrides.
+
+    Allows different pipeline steps to use different models.
+    If a step is not specified, falls back to the default model.
+    """
+    step_models: dict[str, str] = field(default_factory=dict)
+
+    def get_model(self, step_name: str, default: str) -> str:
+        """Get the model for a step, or the default if not configured."""
+        return self.step_models.get(step_name, default)
 
 
 # ─── Usage tracking ──────────────────────────────────────────────────────────
@@ -179,15 +193,23 @@ class LLMClient:
     # ── Raw call ─────────────────────────────────────────────────────────────
 
     def call(
-            self,
-            step_name: str,
-            system: str,
-            user: str,
+        self,
+        step_name: str,
+        system: str,
+        user: str,
+        model: Optional[str] = None,
     ) -> str:
         """
         Send a single-turn system + user prompt. Returns the full response text.
         Retries on transient errors with exponential backoff.
+
+        Args:
+            step_name: Name of the pipeline step for logging/tracking.
+            system: System prompt content.
+            user: User prompt content.
+            model: Optional model override. If None, uses config default.
         """
+        effective_model = model or self.config.model
         delay = self.config.retry_base_delay
         last_exc: Optional[Exception] = None
 
@@ -195,7 +217,7 @@ class LLMClient:
             try:
                 logger.debug("[%s] attempt %d/%d", step_name, attempt, self.config.max_retries)
                 response = self._client.chat.completions.create(
-                    model=self.config.model,
+                    model=effective_model,
                     max_tokens=self.config.max_tokens,
                     temperature=self.config.temperature,
                     messages=[
@@ -247,6 +269,7 @@ class LLMClient:
         step_name: str,
         system: str,
         user: str,
+        model: Optional[str] = None,
     ) -> Any:
         """
         Call the LLM and parse the response as JSON.
@@ -256,10 +279,16 @@ class LLMClient:
         2. ```json ... ``` fenced code block
         3. JSON embedded anywhere in prose (last-resort extraction)
 
+        Args:
+            step_name: Name of the pipeline step for logging/tracking.
+            system: System prompt content.
+            user: User prompt content.
+            model: Optional model override. If None, uses config default.
+
         Raises:
-        LLMParseError: if no valid JSON can be extracted.
+            LLMParseError: if no valid JSON can be extracted.
         """
-        raw = self.call(step_name=step_name, system=system, user=user)
+        raw = self.call(step_name=step_name, system=system, user=user, model=model)
         return self._extract_json(raw, step_name)
 
 
@@ -270,11 +299,19 @@ class LLMClient:
         step_name: str,
         system: str,
         user: str,
+        model: Optional[str] = None,
     ) -> str:
         """
         Async version of call(). Send a single-turn system + user prompt.
         Returns the full response text. Retries on transient errors.
+
+        Args:
+            step_name: Name of the pipeline step for logging/tracking.
+            system: System prompt content.
+            user: User prompt content.
+            model: Optional model override. If None, uses config default.
         """
+        effective_model = model or self.config.model
         delay = self.config.retry_base_delay
         last_exc: Optional[Exception] = None
 
@@ -282,7 +319,7 @@ class LLMClient:
             try:
                 logger.debug("[%s] async attempt %d/%d", step_name, attempt, self.config.max_retries)
                 response = await self._async_client.chat.completions.create(
-                    model=self.config.model,
+                    model=effective_model,
                     max_tokens=self.config.max_tokens,
                     temperature=self.config.temperature,
                     messages=[
@@ -335,11 +372,18 @@ class LLMClient:
         step_name: str,
         system: str,
         user: str,
+        model: Optional[str] = None,
     ) -> Any:
         """
         Async version of call_json(). Call the LLM and parse the response as JSON.
+
+        Args:
+            step_name: Name of the pipeline step for logging/tracking.
+            system: System prompt content.
+            user: User prompt content.
+            model: Optional model override. If None, uses config default.
         """
-        raw = await self.async_call(step_name=step_name, system=system, user=user)
+        raw = await self.async_call(step_name=step_name, system=system, user=user, model=model)
         return self._extract_json(raw, step_name)
 
 

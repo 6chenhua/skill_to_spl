@@ -27,6 +27,7 @@ _SECTION_KEYS = ["INTENT", "WORKFLOW", "CONSTRAINTS", "TOOLS",
 def run_step1_structure_extraction(
     package: SkillPackage,
     client: LLMClient,
+    model: Optional[str] = None,
 ) -> tuple[SectionBundle, list[ToolSpec]]:
     """
     Step 1: Parse the assembled skill package into 8 canonical sections.
@@ -34,8 +35,13 @@ def run_step1_structure_extraction(
 
     Also extracts network APIs from TOOLS section and converts them to ToolSpec objects.
 
+    Args:
+        package: The assembled skill package to parse.
+        client: LLM client for making API calls.
+        model: Optional model override. If None, uses client's default model.
+
     Returns:
-    Tuple of (SectionBundle with verbatim items per section, list of ToolSpec from network APIs).
+        Tuple of (SectionBundle with verbatim items per section, list of ToolSpec from network APIs).
     """
     user_prompt = templates.render_step1_user(
         merged_doc_text=package.merged_doc_text,
@@ -45,6 +51,7 @@ def run_step1_structure_extraction(
         step_name="step1_structure_extraction",
         system=templates.STEP1_SYSTEM,
         user=user_prompt,
+        model=model,
     )
 
     bundle = _parse_section_bundle(raw)

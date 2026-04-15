@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
 from models.data_models import APISpec, APISymbolTable, ToolSpec
 from pipeline.llm_client import LLMClient
@@ -33,6 +34,7 @@ def generate_api_definitions(
     tools: list[ToolSpec],
     client: LLMClient,
     max_workers: int = 4,
+    model: Optional[str] = None,
 ) -> APISymbolTable:
     """
     Generate DEFINE_APIS blocks for all tools.
@@ -45,6 +47,7 @@ def generate_api_definitions(
         tools: List of ToolSpec from package.tools (merged from Step 1 + P3)
         client: LLM client for making calls
         max_workers: Max parallel workers for API generation
+        model: Optional model override. If None, uses client's default model.
 
     Returns:
         APISymbolTable containing all generated API definitions
@@ -58,7 +61,7 @@ def generate_api_definitions(
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         # Launch one LLM call per tool in parallel
         futures = {
-            tool.name: pool.submit(_generate_single_api, client, tool)
+            tool.name: pool.submit(_generate_single_api, client, tool, model)
             for tool in tools
         }
 
@@ -78,13 +81,18 @@ def generate_api_definitions(
     return APISymbolTable(apis=apis)
 
 
-def _generate_single_api(client: LLMClient, tool: ToolSpec) -> APISpec | None:
+def _generate_single_api(
+    client: LLMClient,
+    tool: ToolSpec,
+    model: Optional[str] = None,
+) -> APISpec | None:
     """
     Generate DEFINE_API block for a single tool.
 
     Args:
         client: LLM client
         tool: ToolSpec with name, input_schema, output_schema, etc.
+        model: Optional model override. If None, uses client's default model.
 
     Returns:
         APISpec with generated SPL and parsed I/O schemas
@@ -107,6 +115,7 @@ def _generate_single_api(client: LLMClient, tool: ToolSpec) -> APISpec | None:
             step_name="step1_5_api_generation",
             system=templates.S1_5_API_SYSTEM,
             user=templates.render_s1_5_api_user(tool_json),
+            model=model,
         )
 
         # Parse I/O schemas from the generated SPL
@@ -204,9 +213,18 @@ def _parse_output_schema(output_schema) -> list[dict]:
 # Async versions
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _generate_single_api_async(client: LLMClient, tool: ToolSpec) -> APISpec | None:
+async def _generate_single_api_async(
+    client: LLMClient,
+    tool: ToolSpec,
+    model: Optional[str] = None,
+) -> APISpec | None:
     """
     Async version: Generate DEFINE_API block for a single tool.
+
+    Args:
+        client: LLM client
+        tool: ToolSpec with name, input_schema, output_schema, etc.
+        model: Optional model override. If None, uses client's default model.
     """
     try:
         # Prepare tool info as JSON for the LLM
@@ -226,6 +244,7 @@ async def _generate_single_api_async(client: LLMClient, tool: ToolSpec) -> APISp
             step_name="step1_5_api_generation",
             system=templates.S1_5_API_SYSTEM,
             user=templates.render_s1_5_api_user(tool_json),
+            model=model,
         )
 
         # Parse I/O schemas from the generated SPL
