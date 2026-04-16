@@ -139,6 +139,7 @@ def main():
         output_dir="output/sample_simplified",
         llm_config=llm_config,
         save_checkpoints=True,
+        enable_clarification=True,
     )
     print(f"Output directory: {config.output_dir}")
     print()

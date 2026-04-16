@@ -34,6 +34,7 @@ from pipeline.llm_steps import (
     run_step3b_workflow_analysis,
     run_step4_spl_emission,
     run_step4_spl_emission_parallel,
+    run_step3_full,  # NEW: W→IO→T orchestrator
 )
 from pipeline.llm_steps.step1_5_api_generation import (
     generate_api_definitions,
@@ -82,6 +83,7 @@ class PipelineConfig:
         step_llm_config: Optional[StepLLMConfig] = None,
         save_checkpoints: bool = True,
         resume_from: Optional[str] = None,
+        use_new_step3: bool = True,  # NEW: Enable new Step 3 (W→IO→T)
     ):
         self.skill_root = skill_root
         self.output_dir = output_dir or str(Path(skill_root) / ".cnlp_output")
@@ -89,6 +91,7 @@ class PipelineConfig:
         self.step_llm_config = step_llm_config
         self.save_checkpoints = save_checkpoints
         self.resume_from = resume_from
+        self.use_new_step3 = use_new_step3  # NEW
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -214,73 +217,207 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
     })
     logger.info("[Step 1.5] generated %d API definitions", len(api_table.apis))
 
-    # ── Step 3 & 4: Parallel execution with dependency-driven scheduling ───
-    # 
-    # Dependency graph:
-    #   Step 3A (entities) ──┬─→ S4C → symbol_table → (S4A || S4B)
-    #                        │
-    #                        └─→ Step 3B ──→ workflow/flows ──→ S4D
-    #                                                          │
-    #   S4E ←───────────────────────────────────────────────────┘
-    #    ↓
-    #   S4F
+# ── Step 3 & 4: Parallel execution with dependency-driven scheduling ───
     #
-    # Phase 1: Step 3A (must complete first)
-    
-    logger.info("[Step 3A] extracting entities...")
-    entities = run_step3a_entity_extraction(bundle=bundle, client=client, model=_step_model(config, "step3a_entity_extraction"))
+    # NEW: Step 3 (W→IO→T) replaces old Step 3A + Step 3B
+    # Dependency graph:
+    # Step 3 (W→IO→T) ──┬─→ TYPES + Global Registry
+    #                   │     ↓
+    #                   ├─→ S4C (variables/files with types)
+    #                   │     ↓
+    #                   │   symbol_table → (S4A || S4B)
+    #                   │
+    #                   └─→ workflow/flows ──→ S4D
+    #                                          │
+    # S4E ←────────────────────────────────────┘
+    #   ↓
+    # S4F
+    #
+    # Phase 1: NEW Step 3 (W→IO→T) - unified entity, workflow, and type extraction
 
-    # Phase 2: Parallel lines
-    # Line 1: Step 3B (workflow analysis) + S4D (APIs)
-    # Line 2: S4C (variables/files) → S4A + S4B
-    logger.info("[Parallel] launching Line 1 (3B→S4D) and Line 2 (S4C→S4A/B)...")
-
-    with ThreadPoolExecutor(max_workers=2) as phase2_pool:
-        # Line 1: Step 3B (needs entity_ids from 3A and tools from P2.5/Step 1)
-        entity_ids = [e.entity_id for e in entities]
-        future_3b = phase2_pool.submit(
-            run_step3b_workflow_analysis,
-            bundle=bundle,
-            entity_ids=entity_ids,
-            tools=package.tools,
+    if config.use_new_step3:
+        # NEW: Use unified Step 3 (W→IO→T)
+        logger.info("[Step 3] running unified W→IO→T extraction (NEW)...")
+        
+        import asyncio
+        step3_result = asyncio.run(run_step3_full(
+            workflow_section=bundle.to_text(["WORKFLOW"]),
+            tools_section=bundle.to_text(["TOOLS"]),
+            evidence_section=bundle.to_text(["EVIDENCE"]),
+            artifacts_section=bundle.to_text(["ARTIFACTS"]),
+            available_tools=[{"name": t.name, "api_type": t.api_type} for t in package.tools],
             client=client,
-            model=_step_model(config, "step3b_workflow_analysis"),
+            model=_step_model(config, "step3")
+        ))
+        
+        # Convert new Step 3 output to old StructuredSpec format
+        from models.data_models import EntitySpec, WorkflowStepSpec, AlternativeFlowSpec, ExceptionFlowSpec
+        
+        # Build entities from global registry
+        entities = []
+        for var_name, var_spec in step3_result["global_registry"].variables.items():
+            entities.append(EntitySpec(
+                entity_id=var_name,
+                type_name=var_spec.type_expr.to_spl(),
+                kind="Variable",
+                is_file=var_spec.is_file,
+                schema_notes=var_spec.description,
+                provenance_required=True,
+                provenance="EXPLICIT",
+                source_text=f"Variable from global registry: {var_name}",
+            ))
+        for var_name, var_spec in step3_result["global_registry"].files.items():
+            entities.append(EntitySpec(
+                entity_id=var_name,
+                type_name=var_spec.type_expr.to_spl(),
+                kind="Artifact",
+                is_file=True,
+                schema_notes=var_spec.description,
+                provenance_required=True,
+                provenance="EXPLICIT",
+                source_text=f"File artifact from global registry: {var_name}",
+            ))
+
+        # Build workflow steps from Step 3-W output + I/O specs
+        workflow_steps = []
+        for step_raw in step3_result["workflow_steps"]:
+            io_spec = step3_result["step_io_specs"].get(step_raw.step_id)
+            if io_spec:
+                prerequisites = list(io_spec.prerequisites.keys())
+                produces = list(io_spec.produces.keys())
+            else:
+                prerequisites = []
+                produces = []
+            workflow_steps.append(WorkflowStepSpec(
+                step_id=step_raw.step_id,
+                description=step_raw.description,
+                action_type=step_raw.action_type,
+                tool_hint=step_raw.tool_hint,
+                is_validation_gate=step_raw.is_validation_gate,
+                prerequisites=prerequisites,
+                produces=produces,
+                source_text=step_raw.source_text,
+            ))
+
+        structured_spec = StructuredSpec(
+            entities=entities,
+            workflow_steps=workflow_steps,
+            alternative_flows=step3_result.get("alternative_flows", []),
+            exception_flows=step3_result.get("exception_flows", []),
         )
         
-        # Line 2: S4C (needs entities from 3A)
-        # We'll handle S4A and S4B after S4C completes
-        # Prepare inputs for Line 2 (we need workflow info for S4E later, prepare minimal)
-        # We'll launch S4C now, then S4A/S4B when symbol_table is ready
-        s4a_in, s4b_in, s4c_in, s4d_in, s4e_in, s4f_in = _prepare_step4_inputs_parallel(
-            bundle, entities, [], [], []  # workflow/flows will be filled later
+        # Save TYPES block separately for Step 4
+        types_spl = step3_result.get("types_spl", "")
+        type_registry = step3_result.get("type_registry", {})
+        
+        ckpt.save("step3_new_output", step3_result)
+        logger.info("[Step 3] extracted %d entities, %d workflow steps", len(entities), len(workflow_steps))
+        logger.info("[Step 3] generated %d type declarations", len(type_registry))
+        
+        # NEW: Generate [DEFINE_VARIABLES:] and [DEFINE_FILES:] from Step 3 registry
+        logger.info("[Step 4C] generating variables and files from Step 3 registry...")
+        
+        from pipeline.llm_steps.step4_spl_emission.s4c_from_registry import generate_variables_files_from_registry
+        
+        # Generate blocks directly from registry
+        block_4c = generate_variables_files_from_registry(
+            registry=step3_result["global_registry"],
+            types_spl=types_spl if types_spl else None
         )
         
-        future_4c = phase2_pool.submit(_call_4c, client, s4c_in, model=_step_model(config, "step4c_variables_files"))
+        # Save S4C output
+        ckpt.save("step4c_variables_files", {"variables_files_spl": block_4c, "types_spl": types_spl})
+        logger.info("[Step 4C] generated variables/files block (%d chars)", len(block_4c))
 
-        # Wait for both lines to complete
-        structured_spec_partial = future_3b.result() # Has workflow_steps, flows, but empty entities
-        block_4c = future_4c.result()
+    else:
+        # LEGACY: Use old Step 3A + Step 3B
+        logger.info("[Step 3A] extracting entities...")
+        entities = run_step3a_entity_extraction(bundle=bundle, client=client, model=_step_model(config, "step3a_entity_extraction"))
+        
+        # Initialize types_spl for legacy mode
+        types_spl = ""
+        type_registry = {}
 
-        # Save S4C output (variables and files)
-        ckpt.save("step4c_variables_files", {"variables_files_spl": block_4c})
-    
-    # Build complete StructuredSpec
-    structured_spec = StructuredSpec(
-        entities=entities,
-        workflow_steps=structured_spec_partial.workflow_steps,
-        alternative_flows=structured_spec_partial.alternative_flows,
-        exception_flows=structured_spec_partial.exception_flows,
-    )
+        # Phase 2: Parallel lines
+        # Line 1: Step 3B (workflow analysis) + S4D (APIs)
+        # Line 2: S4C (variables/files) → S4A + S4B
+        logger.info("[Parallel] launching Line 1 (3B→S4D) and Line 2 (S4C→S4A/B)...")
+
+        with ThreadPoolExecutor(max_workers=2) as phase2_pool:
+            # Line 1: Step 3B (needs entity_ids from 3A and tools from P2.5/Step 1)
+            entity_ids = [e.entity_id for e in entities]
+            future_3b = phase2_pool.submit(
+                run_step3b_workflow_analysis,
+                bundle=bundle,
+                entity_ids=entity_ids,
+                tools=package.tools,
+                client=client,
+                model=_step_model(config, "step3b_workflow_analysis"),
+            )
+
+            # Line 2: S4C (needs entities from 3A)
+            # We'll handle S4A and S4B after S4C completes
+            # Prepare inputs for Line 2 (we need workflow info for S4E later, prepare minimal)
+            # We'll launch S4C now, then S4A/S4B when symbol_table is ready
+            s4a_in, s4b_in, s4c_in, s4d_in, s4e_in, s4f_in = _prepare_step4_inputs_parallel(
+                bundle, entities, [], [], [] # workflow/flows will be filled later
+            )
+
+            future_4c = phase2_pool.submit(_call_4c, client, s4c_in, model=_step_model(config, "step4c_variables_files"))
+
+            # Wait for both lines to complete
+            structured_spec_partial = future_3b.result() # Has workflow_steps, flows, but empty entities
+            block_4c = future_4c.result()
+
+            # Save S4C output (variables and files)
+            ckpt.save("step4c_variables_files", {"variables_files_spl": block_4c})
+
+            # Build complete StructuredSpec
+            structured_spec = StructuredSpec(
+                entities=entities,
+                workflow_steps=structured_spec_partial.workflow_steps,
+                alternative_flows=structured_spec_partial.alternative_flows,
+                exception_flows=structured_spec_partial.exception_flows,
+            )
+            
+            types_spl = ""  # No TYPES in legacy mode
+            type_registry = {}
+        
     ckpt.save("step3_structured_spec", structured_spec)
-    
+
     # Phase 3: Complete Line 2 (S4A, S4B) and prepare S4D/S4E/S4F
     logger.info("[Step 4] Phase 3: completing S4A/S4B and running S4D/E/F...")
+
+    # block_4c is already set in both paths:
+    # - New path: generated from registry in Step 3
+    # - Legacy path: from S4C future result
+    # DO NOT reset it here!
+
+    # Extract symbol table from S4C output (or generate from new Step 3 registry)
+    if config.use_new_step3:
+        # Generate symbol table from block_4c (which was generated from Step 3 registry)
+        symbol_table = _extract_symbol_table(
+            block_4c,  # Use the generated block
+            types_spl=types_spl
+        )
+        # Add types to symbol table
+        if types_spl:
+            import re
+            type_matches = re.findall(
+                r'^\s*(?:"[^"]*"\s*)?([A-Z][a-zA-Z0-9]*)\s*=',
+                types_spl,
+                re.MULTILINE
+            )
+            symbol_table["types"] = type_matches
+    else:
+        # Legacy: extract from S4C block
+        symbol_table = _extract_symbol_table(block_4c)
     
-    # Extract symbol table from S4C output
-    symbol_table = _extract_symbol_table(block_4c)
     symbol_table_text = _format_symbol_table(symbol_table)
-    logger.info("[Step 4] Symbol table — variables: %d, files: %d",
-                 len(symbol_table["variables"]), len(symbol_table["files"]))
+    logger.info("[Step 4] Symbol table — types: %d, variables: %d, files: %d",
+    len(symbol_table.get("types", [])),
+    len(symbol_table.get("variables", [])),
+    len(symbol_table.get("files", [])))
     
     # Re-prepare inputs with complete workflow info
     s4a_inputs, s4b_inputs, _, s4d_inputs, s4e_inputs, s4f_inputs = _prepare_step4_inputs_parallel(
@@ -354,6 +491,12 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
     
     # Assemble final SPL
     from pipeline.llm_steps.step4_spl_emission import _assemble_spl, _build_review_summary
+    
+    # Ensure block_4c is defined (for new Step 3 path)
+    if config.use_new_step3:
+        # block_4c should already be generated in new Step 3 path
+        pass  # block_4c is already set
+    
     spl_text = _assemble_spl(
         graph.skill_id, block_s0, block_4a, block_4b, block_4c, block_4d, block_4e, block_4f
     )

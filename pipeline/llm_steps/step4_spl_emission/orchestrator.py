@@ -40,17 +40,19 @@ logger = logging.getLogger(__name__)
 def run_step4_spl_emission(
     bundle: SectionBundle,
     interface_spec: StructuredSpec,
-    tools: list,  # list[ToolSpec]
+    tools: list, # list[ToolSpec]
     skill_id: str,
     client: LLMClient,
     model: str | None = None,
+    types_spl: str = "",
+    type_registry: dict | None = None,
 ) -> SPLSpec:
     """
     Step 4: Emit the final normalized SPL specification.
 
     Dependency-driven parallel execution:
     1. S4C (variables/files) and S4D (apis) start immediately in parallel
-    - S4C depends on interface_spec.entities (Step 3A output)
+    - S4C depends on interface_spec.entities (Step 3A output) + type_registry
     - S4D depends on interface_spec.workflow_steps (Step 3B output)
 
     2. When S4C completes -> extract symbol_table -> immediately start S4A + S4B
@@ -65,11 +67,93 @@ def run_step4_spl_emission(
     - S4F depends on: worker_spl (from S4E) + bundle[EXAMPLES]
 
     This design maximizes parallelism: S4A and S4B can complete while S4D is still running.
+
+    Args:
+        bundle: SectionBundle with canonical sections
+        interface_spec: Combined output of Step 3A + 3B
+        tools: List of ToolSpec for API generation
+        skill_id: The skill identifier
+        client: LLM client for making calls
+        model: Optional model override
+        types_spl: Optional pre-generated [DEFINE_TYPES:] block SPL text
+        type_registry: Optional GlobalVarRegistry dict mapping type names to definitions
     """
+    type_registry = type_registry or {}
+
     # Prepare all inputs upfront (lightweight, no LLM calls)
     s4a_inputs, s4b_inputs, s4c_inputs, s4d_inputs, s4e_inputs, s4f_inputs = _prepare_step4_inputs_v2(
-        bundle, interface_spec, tools
+        bundle, interface_spec, tools, type_registry
     )
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        # -- Phase 1: Launch S4C and S4D immediately (they are independent) ------
+        # S4D now launches one LLM call per tool for individual API generation
+        logger.info("[Step 4] Phase 1: Launching S4C (variables/files) and S4D (apis per tool) in parallel")
+
+        future_4c = pool.submit(_call_4c, client, s4c_inputs, model=model)
+
+        # Launch S4D: one LLM call per tool
+        tools_list = s4d_inputs.get("tools_list", [])
+        if s4d_inputs["has_tools"] and tools_list:
+            logger.info("[Step 4] Phase 1: Launching S4D with %d tools (individual LLM calls)", len(tools_list))
+            futures_4d = [pool.submit(_call_4d, client, tool, model=model) for tool in tools_list]
+        else:
+            logger.info("[Step 4] Phase 1: No tools found, S4D skipped")
+            futures_4d = []
+
+        # -- Phase 2: When S4C completes, extract symbol table and launch S4A + S4B --
+        # Note: We don't wait for S4D here - this is the key optimization!
+        logger.info("[Step 4] Phase 2: Waiting for S4C to extract symbol table...")
+        block_4c = future_4c.result()
+
+        symbol_table = _extract_symbol_table(block_4c, types_spl)
+        symbol_table_text = _format_symbol_table(symbol_table)
+        logger.info("[Step 4] Symbol table extracted - types: %d, variables: %d, files: %d",
+            len(symbol_table.get("types", [])), len(symbol_table["variables"]), len(symbol_table["files"]))
+
+        # Launch S4A and S4B immediately (they only need symbol_table, not apis_spl)
+        logger.info("[Step 4] Phase 2: Launching S4A (persona) and S4B (constraints) in parallel")
+        future_4a = pool.submit(_call_4a, client, s4a_inputs, symbol_table_text, model=model)
+        future_4b = pool.submit(_call_4b, client, s4b_inputs, symbol_table_text, model=model)
+
+        # -- Phase 3: Wait for all S4D calls to complete, then launch S4E ----------------
+        # S4E needs both symbol_table (ready) and apis_spl (from S4D - now multiple results)
+        logger.info("[Step 4] Phase 3: Waiting for S4D to complete...")
+        block_4d_parts = [f.result() for f in futures_4d] if futures_4d else []
+        block_4d = "\n\n".join(block_4d_parts) if block_4d_parts else ""
+        logger.info("[Step 4] Phase 3: S4D completed - %d API definitions generated", len(block_4d_parts))
+
+        logger.info("[Step 4] Phase 3: Launching S4E (worker)")
+        future_4e = pool.submit(_call_4e, client, s4e_inputs, symbol_table_text, block_4d, model=model)
+
+        # -- Phase 4: Collect S4A and S4B results ------------------------------
+        # These may have already completed while we were waiting for S4D
+        block_4a = future_4a.result()
+        block_4b = future_4b.result()
+
+        # -- Phase 5: Wait for S4E, then launch S4F ----------------------------
+        logger.info("[Step 4] Phase 4: Waiting for S4E to complete...")
+        block_4e = future_4e.result()
+
+        block_4f = ""
+        if s4f_inputs["has_examples"]:
+            logger.info("[Step 4] Phase 5: Generating S4F (examples)")
+            block_4f = _call_4f(client, s4f_inputs, block_4e, model=model)
+
+        # -- Assemble final SPL -----------------------------------------------
+        spl_text = _assemble_spl(
+            skill_id, "", block_4a, block_4b, block_4c, block_4d, block_4e, block_4f
+        )
+        review_summary = _build_review_summary()
+        clause_counts = {}
+
+        logger.info("[Step 4] SPL assembled (%d chars)", len(spl_text))
+        return SPLSpec(
+            skill_id=skill_id,
+            spl_text=spl_text,
+            review_summary=review_summary,
+            clause_counts=clause_counts,
+        )
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         # -- Phase 1: Launch S4C and S4D immediately (they are independent) ------
@@ -151,12 +235,14 @@ def run_step4_spl_emission_parallel(
     skill_id: str,
     client: LLMClient,
     model: str | None = None,
+    types_spl: str = "",
+    type_registry: dict | None = None,
 ) -> SPLSpec:
     """
     Step 4: SPL Emission with maximum parallelism between 3A/3B and Step 4.
 
     Parallel execution lines:
-    Line 1: S4C (needs entities) -> symbol_table -> (S4A || S4B)
+    Line 1: S4C (needs entities + type_registry) -> symbol_table -> (S4A || S4B)
     Line 2: S4D (needs workflow_steps with NETWORK effects)
 
     Merge point: S4E needs both symbol_table (from Line 1) and apis_spl (from Line 2)
@@ -170,13 +256,18 @@ def run_step4_spl_emission_parallel(
         exception_flows: From Step 3B workflow analysis
         skill_id: The skill identifier
         client: LLM client for making calls
+        model: Optional model override
+        types_spl: Optional pre-generated [DEFINE_TYPES:] block SPL text
+        type_registry: Optional GlobalVarRegistry dict mapping type names to definitions
 
     Returns:
         SPLSpec with the complete SPL specification
     """
+    type_registry = type_registry or {}
+
     # Prepare inputs for each sub-step
     s4a_inputs, s4b_inputs, s4c_inputs, s4d_inputs, s4e_inputs, s4f_inputs = _prepare_step4_inputs_parallel(
-        bundle, entities, workflow_steps, alternative_flows, exception_flows
+        bundle, entities, workflow_steps, alternative_flows, exception_flows, type_registry
     )
 
     with ThreadPoolExecutor(max_workers=4) as pool:
@@ -198,10 +289,10 @@ def run_step4_spl_emission_parallel(
         logger.info("[Step 4] Line 1: Waiting for S4C to extract symbol table...")
         block_4c = future_4c.result()
 
-        symbol_table = _extract_symbol_table(block_4c)
+        symbol_table = _extract_symbol_table(block_4c, types_spl)
         symbol_table_text = _format_symbol_table(symbol_table)
-        logger.info("[Step 4] Symbol table extracted - variables: %d, files: %d",
-                    len(symbol_table["variables"]), len(symbol_table["files"]))
+        logger.info("[Step 4] Symbol table extracted - types: %d, variables: %d, files: %d",
+            len(symbol_table.get("types", [])), len(symbol_table["variables"]), len(symbol_table["files"]))
 
         # Launch S4A and S4B (they only need symbol_table, not apis_spl)
         logger.info("[Step 4] Line 1: Launching S4A (persona) and S4B (constraints)")

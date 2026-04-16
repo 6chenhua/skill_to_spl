@@ -78,10 +78,10 @@ if __name__ == '__main__':
     tep_config = StepLLMConfig(
         step_models={
             # === Pre-steps ===
-            "step1_structure_extraction": "gpt-4o-mini",
-            "step1_5_api_generation": "gpt-4o-mini",
+            "step1_structure_extraction": "gpt-4o",
+            "step1_5_api_generation": "gpt-4o",
 
-            # === Step 3 ===
+            # === Old Step 3 ===
             "step3a_entity_extraction": "gpt-4o",
             "step3b_workflow_analysis": "gpt-4o",
 
@@ -96,13 +96,13 @@ if __name__ == '__main__':
             "step4b_constraints": "gpt-4o",
 
             # S4C: Variables/Files - 格式转换，较简单
-            "step4c_variables_files": "gpt-4o-mini",
+            "step4c_variables_files": "gpt-4o",
 
             # S4E: Worker - **最关键**，生成工作流逻辑
-            "step4e_worker": "gpt-4-turbo",  # 用最强模型
+            "step4e_worker": "gpt-4",  # 用最强模型
 
             # S4E1: Nesting Detection - 检测嵌套问题
-            "step4e1_nesting_detection": "gpt-4o-mini",
+            "step4e1_nesting_detection": "gpt-4o",
 
             # S4E2: Nesting Fix - 修复嵌套问题
             "step4e2_nesting_fix": "gpt-4o",
@@ -116,9 +116,10 @@ if __name__ == '__main__':
         skill_root=f'skills/{skill}',
         output_dir=output_dir,
         llm_config=llm_config,
-        step_llm_config=step_config,
+        # step_llm_config=step_config,
         # capability_profile=capability_profile,
         save_checkpoints=True,
+        use_new_step3=True,
     )
 
     result = run_pipeline(config)

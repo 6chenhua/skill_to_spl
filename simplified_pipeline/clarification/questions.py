@@ -141,40 +141,22 @@ QUESTION_TEMPLATES: dict[AmbiguityType, QuestionTemplate] = {
         context_hint="Clear criteria help ensure consistent behavior.",
         priority=QuestionPriority.MEDIUM,
     ),
-    AmbiguityType.TEMPORAL: QuestionTemplate(
-        template_text="The timing for '{term}' is unclear. When should this occur?",
-        options_generator=_temporal_options,
-        context_hint="Clear timing ensures correct workflow sequencing.",
-        priority=QuestionPriority.MEDIUM,
-    ),
-    AmbiguityType.TYPE_AMBIGUITY: QuestionTemplate(
-        template_text="The data type for '{term}' is not specified. What type of data should this contain?",
-        options_generator=_type_options,
-        context_hint="Correct data types prevent processing errors.",
-        priority=QuestionPriority.HIGH,
-    ),
     AmbiguityType.PRAGMATIC: QuestionTemplate(
         template_text="'{term}' is vague. Please provide more specific criteria:",
         options_generator=lambda t: ["Specific value or range", "Reference to standard", "Depends on context", "Other: ____"],
         context_hint="Specific criteria ensure consistent implementation.",
         priority=QuestionPriority.MEDIUM,
     ),
-    AmbiguityType.SCOPE: QuestionTemplate(
-        template_text="The scope of '{term}' is unclear. What exactly does this apply to?",
-        options_generator=lambda t: ["All items in the category", "Specific subset (specify)", "Case-by-case determination", "Other: ____"],
-        context_hint="Clear scope prevents unintended behavior.",
+    AmbiguityType.CONTEXT: QuestionTemplate(
+        template_text="The context for '{term}' is unclear. What additional context is needed?",
+        options_generator=lambda t: ["More background information", "Specific use case", "Related constraints", "Other: ____"],
+        context_hint="Additional context ensures correct interpretation.",
         priority=QuestionPriority.HIGH,
     ),
-    AmbiguityType.CONDITIONAL: QuestionTemplate(
-        template_text="The condition for '{term}' needs clarification. Under what circumstances does this apply?",
-        options_generator=lambda t: ["Always applies", "Applies when (specify condition)", "Never applies", "Other: ____"],
-        context_hint="Clear conditions ensure correct workflow branching.",
-        priority=QuestionPriority.HIGH,
-    ),
-    AmbiguityType.MISSING_INFO: QuestionTemplate(
-        template_text="Required information is missing: '{term}'. What should this be?",
-        options_generator=lambda t: ["Provide specific value", "Derive from context", "Make optional", "Other: ____"],
-        context_hint="Missing information may block implementation.",
+    AmbiguityType.CONFLICT: QuestionTemplate(
+        template_text="There appears to be a conflict involving '{term}'. Which interpretation should take precedence?",
+        options_generator=lambda t: ["First interpretation", "Second interpretation", "Merge both (specify how)", "Other: ____"],
+        context_hint="Resolving conflicts ensures consistent behavior.",
         priority=QuestionPriority.CRITICAL,
     ),
 }
@@ -343,22 +325,28 @@ class QuestionGenerator:
         template = QUESTION_TEMPLATES.get(marker.ambiguity_type)
         if not template:
             raise ValueError(f"No template for ambiguity type: {marker.ambiguity_type}")
-        
+
         # Generate question text
         question_text = template.template_text.format(term=term)
-        
+
         # Generate options
         options = template.options_generator(term)
-        
+
         # Determine priority from severity
         priority = self._severity_to_priority(marker.severity)
-        
+
+        # Create context display: show the source text with the term highlighted
+        context_display = self._format_context_display(marker.source_text, term)
+
+        # Combine question with context for better user understanding
+        full_question_text = f"{context_display}\n\n{question_text}"
+
         # Create question
         self._question_counter += 1
         return ClarificationQuestion(
             question_id=f"q_{self._question_counter:04d}_{uuid.uuid4().hex[:8]}",
             ambiguity_marker_id=f"marker_{marker.section_name}_{marker.source_item_index}",
-            question_text=question_text,
+            question_text=full_question_text,
             options=options,
             allow_other=True,
             context_hint=template.context_hint,
@@ -367,7 +355,50 @@ class QuestionGenerator:
             source_section=marker.section_name,
             source_text=marker.source_text,
         )
-    
+
+    def _format_context_display(self, source_text: str, term: str) -> str:
+        """
+        Format the source text to show context around the ambiguous term.
+        
+        This helps users understand where the ambiguity appears in the original text.
+        
+        Args:
+            source_text: The full source text containing the ambiguity
+            term: The ambiguous term to highlight
+            
+        Returns:
+            Formatted string showing context with highlighted term
+        """
+        # Find the term position (case-insensitive)
+        pattern = re.compile(re.escape(term), re.IGNORECASE)
+        match = pattern.search(source_text)
+        
+        if not match:
+            # Term not found, show truncated source
+            if len(source_text) <= 100:
+                return f"原文片段：{source_text}"
+            return f"原文片段：{source_text[:100]}..."
+        
+        # Calculate context window (50 chars before and after)
+        start_pos = match.start()
+        end_pos = match.end()
+        
+        context_before = max(0, start_pos - 50)
+        context_after = min(len(source_text), end_pos + 50)
+        
+        # Extract context
+        prefix = "..." if context_before > 0 else ""
+        suffix = "..." if context_after < len(source_text) else ""
+        
+        before = source_text[context_before:start_pos]
+        highlighted = source_text[start_pos:end_pos]
+        after = source_text[end_pos:context_after]
+        
+        # Format with highlight markers
+        context_snippet = f"{prefix}{before}【{highlighted}】{after}{suffix}"
+        
+        return f"原文片段：{context_snippet}"
+
     def _generate_with_llm(
         self,
         marker: AmbiguityMarker,

@@ -17,6 +17,9 @@ from .models import (
     SectionBundle,
     StructuredSpec,
 )
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .clarification.models import ClarificationContext
 from .llm_client import LLMClient, LLMConfig, SessionUsage
 from .steps import (
     run_step1_structure_extraction,
@@ -30,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 class PipelineConfig:
     """Configuration for the simplified pipeline."""
-    
+
     def __init__(
         self,
         merged_doc_text: str,
@@ -38,6 +41,11 @@ class PipelineConfig:
         output_dir: Optional[str] = None,
         llm_config: Optional[LLMConfig] = None,
         save_checkpoints: bool = True,
+        # HITL Configuration
+        enable_clarification: bool = False,
+        clarification_sensitivity: str = "medium",
+        clarification_max_iterations: int = 5,
+        clarification_ui: Optional[str] = "console",
     ):
         """
         Args:
@@ -46,12 +54,21 @@ class PipelineConfig:
             output_dir: Where to write output (defaults to ./.simplified_output)
             llm_config: LLM configuration
             save_checkpoints: Whether to save intermediate results
+            enable_clarification: Enable/disable HITL clarification step
+            clarification_sensitivity: Detection sensitivity ("low", "medium", "high")
+            clarification_max_iterations: Max clarification iterations (1-10)
+            clarification_ui: UI type ("console" or None for headless)
         """
         self.merged_doc_text = merged_doc_text
         self.skill_id = skill_id
         self.output_dir = output_dir or f"./.simplified_output/{skill_id}"
         self.llm_config = llm_config or LLMConfig()
         self.save_checkpoints = save_checkpoints
+        # HITL Configuration
+        self.enable_clarification = enable_clarification
+        self.clarification_sensitivity = clarification_sensitivity
+        self.clarification_max_iterations = clarification_max_iterations
+        self.clarification_ui = clarification_ui
 
 
 def run_pipeline(config: PipelineConfig) -> PipelineResult:
@@ -87,7 +104,65 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
         client=client,
     )
     _save_checkpoint(config, "step1_bundle", bundle)
-    
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # HITL: Clarification (NEW - inserted after Step 1)
+    # ═════════════════════════════════════════════════════════════════════════
+    clarification_context = None
+    if config.enable_clarification:
+        from .clarification import (
+            AmbiguityDetector,
+            QuestionGenerator,
+            SensitivityConfig,
+        )
+        from .clarification.manager import ClarificationManager
+        from .clarification.models import ClarificationContext
+        from .clarification.ui import ConsoleClarificationUI
+
+        logger.info("[HITL] Running ambiguity detection...")
+
+        # Create sensitivity config
+        sensitivity_map = {
+            "low": SensitivityConfig.low,
+            "medium": SensitivityConfig.medium,
+            "high": SensitivityConfig.high,
+        }
+        sensitivity_config = sensitivity_map.get(
+            config.clarification_sensitivity, SensitivityConfig.medium
+        )()
+
+        # Create detector and check if clarification needed
+        detector = AmbiguityDetector(llm_client=client, config=sensitivity_config)
+        detection_result = detector.detect(bundle)
+
+        if detection_result.needs_clarification:
+            logger.info(
+                f"[HITL] Clarification needed: {len(detection_result.markers)} ambiguities, "
+                f"defect_density={detection_result.defect_density:.3f}"
+            )
+
+            # Create question generator and UI
+            question_gen = QuestionGenerator(llm_client=client)
+            ui = ConsoleClarificationUI()
+
+            # Run clarification
+            manager = ClarificationManager(
+                detector=detector,
+                question_generator=question_gen,
+                ui=ui,
+                max_iterations=config.clarification_max_iterations,
+            )
+            clarification_context = manager.run_clarification(bundle)
+
+            # Apply clarifications to bundle
+            bundle = manager.apply_clarifications(bundle, clarification_context)
+
+            # Save checkpoint
+            _save_checkpoint(config, "clarification_context", clarification_context)
+            logger.info("[HITL] Clarification completed")
+        else:
+            logger.info("[HITL] No clarification needed")
+
     # ── Step 3A: Variable Extraction ────────────────────────────────────
     logger.info("[Step 3A] Extracting variables...")
     variables = run_step3a_variable_extraction(
@@ -130,6 +205,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
         section_bundle=bundle,
         structured_spec=structured_spec,
         spl_spec=spl_spec,
+        clarification_context=clarification_context,  # NEW
     )
     
     logger.info(f"=== Pipeline complete: {skill_id} ===")
@@ -189,17 +265,21 @@ def run_simplified_pipeline(
     output_dir: Optional[str] = None,
     model: str = "gpt-4o",
     api_key: Optional[str] = None,
+    enable_clarification: bool = False,  # NEW
+    clarification_sensitivity: str = "medium",  # NEW
 ) -> PipelineResult:
     """
     Quick entry point for running the simplified pipeline.
-    
+
     Args:
         merged_doc_text: The merged document text to process
         skill_id: Optional identifier for the skill
         output_dir: Where to write output (defaults to ./.simplified_output/{skill_id})
         model: LLM model name
         api_key: OpenAI API key (optional, can use env var)
-    
+        enable_clarification: Enable HITL clarification step (default: False)
+        clarification_sensitivity: Detection sensitivity ("low", "medium", "high")
+
     Returns:
         PipelineResult with spl_spec.spl_text containing the generated SPL
     """
@@ -210,5 +290,7 @@ def run_simplified_pipeline(
         output_dir=output_dir,
         llm_config=llm_config,
         save_checkpoints=True,
+        enable_clarification=enable_clarification,
+        clarification_sensitivity=clarification_sensitivity,
     )
     return run_pipeline(config)

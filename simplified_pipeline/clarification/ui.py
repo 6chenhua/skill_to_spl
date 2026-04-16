@@ -8,7 +8,7 @@ to clarification questions during pipeline execution.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 
 from .models import (
     ClarificationQuestion,
@@ -18,10 +18,16 @@ from .models import (
     ClarificationStatus,
 )
 
+# Import structural question model
+from .structural_models import SectionAssignmentQuestion
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Abstract UI Interface
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+QuestionType = Union[ClarificationQuestion, SectionAssignmentQuestion]
 
 
 class ClarificationUI(ABC):
@@ -33,20 +39,22 @@ class ClarificationUI(ABC):
     - Web UI (for browser-based interaction)
     - API endpoint (for remote/hybrid workflows)
     - Mock UI (for automated testing)
+    
+    Supports both legacy ClarificationQuestion and new SectionAssignmentQuestion.
     """
 
     @abstractmethod
-    def present_question(self, question: ClarificationQuestion) -> None:
+    def present_question(self, question: QuestionType) -> None:
         """
         Display a clarification question to the user.
 
         Args:
-            question: The question to present
+            question: The question to present (ClarificationQuestion or SectionAssignmentQuestion)
         """
         pass
 
     @abstractmethod
-    def collect_response(self, question: ClarificationQuestion) -> UserResponse:
+    def collect_response(self, question: QuestionType) -> UserResponse:
         """
         Collect and validate user response to a question.
 
@@ -108,10 +116,18 @@ class ConsoleClarificationUI(ClarificationUI):
         self._input = input_func if input_func is not None else input
         self._print = print_func if print_func is not None else print
 
-    def present_question(self, question: ClarificationQuestion) -> None:
+    def present_question(self, question: QuestionType) -> None:
         """Display question with formatted options."""
         self._print(f"\n{'=' * 60}")
-        self._print(f"[Question {question.priority.value.upper()}] {question.question_id}")
+        
+        # Handle both legacy and new question types
+        if isinstance(question, ClarificationQuestion):
+            priority = question.priority.value.upper() if hasattr(question, 'priority') else "MEDIUM"
+            self._print(f"[Question {priority}] {question.question_id}")
+        else:
+            # SectionAssignmentQuestion - new type
+            self._print(f"[Question] {question.question_id}")
+        
         self._print(f"\n{question.question_text}\n")
 
         for i, option in enumerate(question.options, 1):

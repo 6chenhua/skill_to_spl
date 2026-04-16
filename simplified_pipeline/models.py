@@ -4,7 +4,10 @@ Simplified data models for the minimal pipeline.
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .clarification.structural_models import SectionGuidance
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -157,3 +160,5 @@ class PipelineResult:
     section_bundle: SectionBundle
     structured_spec: StructuredSpec
     spl_spec: SPLSpec
+    clarification_context: Optional[Any] = None  # Legacy: ClarificationContext if HITL was used
+    structural_guidance: Optional[Any] = None  # NEW: SectionGuidance from Step 0

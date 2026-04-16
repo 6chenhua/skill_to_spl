@@ -8,6 +8,9 @@ This module provides:
 - DetectionResult: Result of ambiguity detection
 - SensitivityConfig: Configuration for detection sensitivity
 - AmbiguityDetector: Hybrid detector combining rule-based and LLM detection
+- ClarificationManager: Orchestrates the clarification workflow
+- ClarificationContext: Complete clarification session state
+- UserResponse: User's answer to a clarification question
 """
 
 from .models import (
@@ -15,10 +18,14 @@ from .models import (
     AmbiguityType,
     AmbiguitySource,
     ClarificationQuestion,
+    ClarificationContext,
+    ClarificationStatus,
     QuestionPriority,
     QuestionGenerationResult,
     DetectionResult,
     SensitivityConfig,
+    UserResponse,
+    ResponseStatus,
 )
 from .detector import (
     AmbiguityDetector,
@@ -43,6 +50,18 @@ try:
 except (ImportError, AttributeError):
     _HAS_QUESTIONS = False
 
+# Optional imports - only available if manager.py exists
+try:
+    from .manager import (
+        ClarificationManager,
+        ClarificationCheckpoint,
+        run_hitl_clarification,
+        ClarificationPipelineStep,
+    )
+    _HAS_MANAGER = True
+except (ImportError, AttributeError):
+    _HAS_MANAGER = False
+
 # Optional imports - only available if prompts.py exists
 try:
     from .prompts import (
@@ -63,10 +82,14 @@ __all__ = [
     "AmbiguityType",
     "AmbiguitySource",
     "ClarificationQuestion",
+    "ClarificationContext",
+    "ClarificationStatus",
     "QuestionPriority",
     "QuestionGenerationResult",
     "DetectionResult",
     "SensitivityConfig",
+    "UserResponse",
+    "ResponseStatus",
     # Detector
     "AmbiguityDetector",
     "RuleBasedDetector",
@@ -85,6 +108,14 @@ if _HAS_QUESTIONS:
         "get_translation_for_term",
         "is_spl_term",
         "sanitize_question_text",
+    ])
+
+if _HAS_MANAGER:
+    __all__.extend([
+        "ClarificationManager",
+        "ClarificationCheckpoint",
+        "run_hitl_clarification",
+        "ClarificationPipelineStep",
     ])
 
 if _HAS_PROMPTS:

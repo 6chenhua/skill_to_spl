@@ -18,12 +18,13 @@ _FILE_NAME_RE = re.compile(
 )
 
 
-def _extract_symbol_table(block_4c: str) -> dict[str, list[str]]:
+def _extract_symbol_table(block_4c: str, types_spl: str = "") -> dict[str, list[str]]:
     """
-    Extract FILES and VARIABLES declared in the DEFINE_VARIABLES/DEFINE_FILES
-    block (4c). APIS are NOT included - they are passed separately to S4E.
+    Extract TYPES, FILES and VARIABLES declared in the blocks.
+    APIS are NOT included - they are passed separately to S4E.
 
     Handles both formats:
+    - [DEFINE_TYPES:] ... [END_TYPES]
     - [DEFINE_VARIABLES:] ... [END_VARIABLES] [DEFINE_FILES:] ... [END_FILES]
     - [DEFINE_FILES:] ... [END_FILES] (no variables section)
     - [DEFINE_VARIABLES:] ... [END_VARIABLES] (no files section)
@@ -36,13 +37,34 @@ def _extract_symbol_table(block_4c: str) -> dict[str, list[str]]:
     "description" [READONLY] variable_name : type
     "description"
     [READONLY] variable_name : type
+
+    Types are extracted from [DEFINE_TYPES:] block:
+    "description" (optional)
+    DeclaredName = <type_expr>
     """
     table: dict[str, list[str]] = {
+        "types": [],
         "variables": [],
         "files": [],
     }
     if not block_4c:
         return table
+
+    # Extract TYPES block if present (from types_spl or block_4c)
+    types_block = types_spl if types_spl else block_4c
+    type_start = types_block.find("[DEFINE_TYPES:]")
+    type_end = types_block.find("[END_TYPES]")
+
+    if type_start >= 0 and type_end > type_start:
+        type_section = types_block[type_start:type_end]
+        # Pattern: TypeName = <type_expr>
+        # Optionally preceded by "description"
+        type_matches = re.findall(
+            r'^\s*(?:"[^"]*"\s*)?([A-Z][a-zA-Z0-9]*)\s*=',
+            type_section,
+            re.MULTILINE
+        )
+        table["types"] = type_matches
 
     # Extract VARIABLES block if present
     var_start = block_4c.find("[DEFINE_VARIABLES:]")
@@ -84,11 +106,15 @@ def _extract_symbol_table(block_4c: str) -> dict[str, list[str]]:
 
 def _format_symbol_table(symbol_table: dict[str, list[str]]) -> str:
     """
-    Render FILES + VARIABLES as a reference block for S4A, S4B, and S4E.
+    Render TYPES, FILES + VARIABLES as a reference block for S4A, S4B, and S4E.
     These are the names that may appear in DESCRIPTION_WITH_REFERENCES across
-    all three blocks. APIS are injected separately into S4E.
+    all blocks. APIS are injected separately into S4E.
+
+    Type names can be referenced in variable/file declarations and in
+    DESCRIPTION_WITH_REFERENCES text.
     """
     mapping = {
+        "types": "TYPES (reference in type expressions: DeclaredName = <TYPE>)",
         "variables": "VARIABLES (reference as <REF> var_name </REF>)",
         "files": "FILES (reference as <REF> file_name </REF>)",
     }
@@ -97,4 +123,6 @@ def _format_symbol_table(symbol_table: dict[str, list[str]]) -> str:
         names = symbol_table.get(key, [])
         if names:
             lines.append(f"{label}:\n {', '.join(names)}")
-    return "\n\n".join(lines) if lines else "(no variables or files declared)"
+
+    all_empty = not any(symbol_table.get(k) for k in mapping.keys())
+    return "\n\n".join(lines) if not all_empty else "(no types, variables, or files declared)"

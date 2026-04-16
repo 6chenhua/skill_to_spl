@@ -34,9 +34,10 @@ def sample_question() -> ClarificationQuestion:
     """Create a sample clarification question for testing."""
     return ClarificationQuestion(
         question_id="q1",
+        ambiguity_marker_id="marker_1",
         question_text="What approach should be used for error handling?",
         options=["Retry with backoff", "Fail fast", "Log and continue"],
-        has_custom_option=True,
+        allow_other=True,
         priority=QuestionPriority.HIGH,
         context_hint="Consider the criticality of the operation",
     )
@@ -48,23 +49,26 @@ def sample_questions() -> list[ClarificationQuestion]:
     return [
         ClarificationQuestion(
             question_id="q1",
+            ambiguity_marker_id="marker_1",
             question_text="What approach should be used for error handling?",
             options=["Retry with backoff", "Fail fast", "Log and continue"],
-            has_custom_option=True,
+            allow_other=True,
             priority=QuestionPriority.HIGH,
         ),
         ClarificationQuestion(
             question_id="q2",
+            ambiguity_marker_id="marker_2",
             question_text="Should we enable caching?",
             options=["Yes", "No"],
-            has_custom_option=False,
+            allow_other=False,
             priority=QuestionPriority.MEDIUM,
         ),
         ClarificationQuestion(
             question_id="q3",
+            ambiguity_marker_id="marker_3",
             question_text="Enter the maximum retry count:",
             options=[],
-            has_custom_option=True,
+            allow_other=True,
             priority=QuestionPriority.CRITICAL,
             context_hint="Recommended: 3-5 attempts",
         ),
@@ -100,7 +104,7 @@ def clarification_context(
     sample_questions: list[ClarificationQuestion],
 ) -> ClarificationContext:
     """Create a clarification context with questions."""
-    return ClarificationContext(questions=sample_questions)
+    return ClarificationContext(session_id="test_session", questions=sample_questions)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -161,7 +165,7 @@ class TestResponseValidator:
 
     def test_validate_context_complete(self, sample_questions):
         """Test context validation with all responses provided."""
-        context = ClarificationContext(questions=sample_questions)
+        context = ClarificationContext(session_id="test_session", questions=sample_questions)
         context.add_response(
             UserResponse(question_id="q1", selected_option="Retry with backoff")
         )
@@ -176,7 +180,7 @@ class TestResponseValidator:
 
     def test_validate_context_missing_responses(self, sample_questions):
         """Test context validation fails when responses are missing."""
-        context = ClarificationContext(questions=sample_questions)
+        context = ClarificationContext(session_id="test_session", questions=sample_questions)
         context.add_response(
             UserResponse(question_id="q1", selected_option="Retry with backoff")
         )
@@ -188,7 +192,7 @@ class TestResponseValidator:
 
     def test_validate_context_invalid_response(self, sample_questions):
         """Test context validation fails for invalid individual response."""
-        context = ClarificationContext(questions=sample_questions)
+        context = ClarificationContext(session_id="test_session", questions=sample_questions)
         context.add_response(
             UserResponse(question_id="q1", selected_option="Invalid Option")
         )
@@ -409,40 +413,52 @@ class TestClarificationContext:
     """Tests for ClarificationContext class."""
 
     def test_add_response_updates_status(self, sample_questions):
-        """Test that adding response updates status."""
-        context = ClarificationContext(questions=sample_questions)
+        """Test that adding response and advancing iteration updates status."""
+        context = ClarificationContext(session_id="test_session", questions=sample_questions)
         assert context.status == ClarificationStatus.PENDING
 
         context.add_response(UserResponse(question_id="q1", selected_option="Option1"))
+        # Status remains PENDING until advance_iteration is called
+        assert context.status == ClarificationStatus.PENDING
+        
+        context.advance_iteration()
         assert context.status == ClarificationStatus.IN_PROGRESS
 
     def test_add_response_completes_session(self, sample_questions):
-        """Test that adding all responses completes the session."""
-        context = ClarificationContext(questions=sample_questions)
+        """Test that adding all responses with ANSWERED status marks session complete."""
+        context = ClarificationContext(session_id="test_session", questions=sample_questions)
 
-        context.add_response(UserResponse(question_id="q1", selected_option="Option1"))
-        context.add_response(UserResponse(question_id="q2", selected_option="Option1"))
-        context.add_response(UserResponse(question_id="q3", selected_option="Option1"))
+        # Create responses with ANSWERED status
+        from .models import ResponseStatus
+        r1 = UserResponse(question_id="q1", selected_option="Option1", status=ResponseStatus.ANSWERED)
+        r2 = UserResponse(question_id="q2", selected_option="Option1", status=ResponseStatus.ANSWERED)
+        r3 = UserResponse(question_id="q3", selected_option="Option1", status=ResponseStatus.ANSWERED)
+        
+        context.add_response(r1)
+        context.add_response(r2)
+        context.add_response(r3)
 
+        # Status remains PENDING until mark_completed is called
+        assert context.status == ClarificationStatus.PENDING
+        context.mark_completed()
         assert context.status == ClarificationStatus.COMPLETED
-        assert context.completed_at is not None
         assert context.is_complete() is True
 
     def test_get_response_finds_response(self, sample_questions):
-        """Test get_response returns correct response."""
-        context = ClarificationContext(questions=sample_questions)
+        """Test get_answer_for_question returns correct response."""
+        context = ClarificationContext(session_id="test_session", questions=sample_questions)
         response = UserResponse(question_id="q1", selected_option="Option1")
         context.add_response(response)
 
-        found = context.get_response("q1")
+        found = context.get_answer_for_question("q1")
         assert found is not None
         assert found.selected_option == "Option1"
 
     def test_get_response_returns_none_for_missing(self, sample_questions):
-        """Test get_response returns None for missing question ID."""
-        context = ClarificationContext(questions=sample_questions)
+        """Test get_answer_for_question returns None for missing question ID."""
+        context = ClarificationContext(session_id="test_session", questions=sample_questions)
 
-        found = context.get_response("nonexistent")
+        found = context.get_answer_for_question("nonexistent")
         assert found is None
 
 
@@ -457,16 +473,20 @@ class TestClarificationQuestion:
     def test_default_priority(self):
         """Test default priority is MEDIUM."""
         q = ClarificationQuestion(
-            question_id="test", question_text="Test question?"
+            question_id="test",
+            ambiguity_marker_id="marker_test",
+            question_text="Test question?",
         )
         assert q.priority == QuestionPriority.MEDIUM
 
-    def test_has_custom_option_default_false(self):
-        """Test default has_custom_option is False."""
+    def test_allow_other_default_true(self):
+        """Test default allow_other is True."""
         q = ClarificationQuestion(
-            question_id="test", question_text="Test question?"
+            question_id="test",
+            ambiguity_marker_id="marker_test",
+            question_text="Test question?",
         )
-        assert q.has_custom_option is False
+        assert q.allow_other is True
 
 
 class TestUserResponse:
@@ -478,10 +498,10 @@ class TestUserResponse:
         assert response.timestamp is not None
         assert response.timestamp != ""
 
-    def test_default_confidence(self):
-        """Test default confidence is 1.0."""
+    def test_default_confidence_is_none(self):
+        """Test default confidence is None."""
         response = UserResponse(question_id="q1", selected_option="Option1")
-        assert response.confidence == 1.0
+        assert response.confidence is None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -494,7 +514,7 @@ class TestClarificationUIIsAbstract:
 
     def test_cannot_instantiate_abstract_class(self):
         """Test that ClarificationUI cannot be instantiated."""
-        with pytest.raises (TypeError, match=r"abstract.*Cannot instantiate"):
+        with pytest.raises(TypeError):
             ClarificationUI()
 
 

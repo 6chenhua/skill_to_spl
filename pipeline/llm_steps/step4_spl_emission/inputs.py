@@ -24,6 +24,7 @@ def _prepare_step4_inputs_parallel(
     workflow_steps: list[WorkflowStepSpec],
     alternative_flows: list[AlternativeFlowSpec],
     exception_flows: list[ExceptionFlowSpec],
+    type_registry: dict | None = None,
 ) -> tuple[dict, dict, dict, dict, dict, dict]:
     """
     Pre-compute all inputs for Step 4 calls with parallel execution support.
@@ -31,14 +32,25 @@ def _prepare_step4_inputs_parallel(
     Accepts decomposed inputs from Step 3A (entities) and Step 3B (workflow/flows)
     to enable maximum parallelism between Step 3 and Step 4.
 
+    Args:
+        bundle: SectionBundle with canonical sections
+        entities: From Step 3A entity extraction
+        workflow_steps: From Step 3B workflow analysis
+        alternative_flows: From Step 3B workflow analysis
+        exception_flows: From Step 3B workflow analysis
+        type_registry: Optional dict mapping type names to type definitions
+                      (GlobalVarRegistry format: {type_name: {description, definition, ...}})
+
     Returns 6 dictionaries for each S4x call.
 
     Parallel lines:
-    Line 1: S4C (entities) -> symbol_table -> S4A + S4B
+    Line 1: S4C (entities + types) -> symbol_table -> S4A + S4B
     Line 2: S4D (workflow_steps with NETWORK effects)
     Merge: S4E (needs symbol_table + apis_spl)
     Final: S4F (needs S4E output)
     """
+    type_registry = type_registry or {}
+
     # S4A inputs - from bundle
     intent_text = bundle.to_text(["INTENT"])
     notes_text = bundle.to_text(["NOTES"])
@@ -54,14 +66,17 @@ def _prepare_step4_inputs_parallel(
         "has_constraints": bool(constraints_text.strip()),
     }
 
-    # S4C inputs - from entities (Step 3A)
-    entities_text = _format_entities_for_s4c(entities)
+    # S4C inputs - from entities (Step 3A) and type_registry (GlobalVarRegistry)
+    types_text = _format_types_for_s4c(type_registry)
+    entities_text = _format_entities_for_s4c(entities, type_registry)
     omit_files = [e for e in entities if getattr(e, "from_omit_files", False)]
     omit_files_text = _format_omit_files_for_s4c(omit_files)
     s4c_inputs = {
         "entities_text": entities_text,
         "omit_files_text": omit_files_text,
         "has_entities": bool(entities),
+        "types_text": types_text,
+        "type_registry": type_registry,
     }
 
     # S4D inputs - from workflow_steps with API action types (Step 3B)
@@ -108,10 +123,17 @@ def _prepare_step4_inputs_parallel(
 def _prepare_step4_inputs_v2(
     bundle: SectionBundle,
     structured_spec: StructuredSpec,
-    tools: list,  # list[ToolSpec]
+    tools: list, # list[ToolSpec]
+    type_registry: dict | None = None,
 ) -> tuple[dict, dict, dict, dict, dict, dict]:
     """
     Pre-compute all inputs for the Step 4 calls.
+
+    Args:
+        bundle: SectionBundle with canonical sections
+        structured_spec: Combined output of Step 3A + 3B
+        tools: List of ToolSpec for API generation
+        type_registry: Optional GlobalVarRegistry dict mapping type names to definitions
 
     Returns 6 dictionaries, one for each S4x call, to avoid passing unnecessary
     data to each function.
@@ -119,11 +141,13 @@ def _prepare_step4_inputs_v2(
     Dependencies:
     S4A: bundle[INTENT + NOTES]
     S4B: bundle[CONSTRAINTS]
-    S4C: structured_spec.entities + omit_files
+    S4C: structured_spec.entities + omit_files + type_registry
     S4D: tools list for API generation
     S4E: ALL workflow_steps + flows + symbol_table + apis_spl + tools
     S4F: bundle[EXAMPLES] + worker_spl
     """
+    type_registry = type_registry or {}
+
     # S4A inputs
     intent_text = bundle.to_text(["INTENT"])
     notes_text = bundle.to_text(["NOTES"])
@@ -140,13 +164,16 @@ def _prepare_step4_inputs_v2(
     }
 
     # S4C inputs
-    entities_text = _format_entities_for_s4c(structured_spec.entities)
+    types_text = _format_types_for_s4c(type_registry)
+    entities_text = _format_entities_for_s4c(structured_spec.entities, type_registry)
     omit_files = [e for e in structured_spec.entities if getattr(e, "from_omit_files", False)]
     omit_files_text = _format_omit_files_for_s4c(omit_files)
     s4c_inputs = {
         "entities_text": entities_text,
         "omit_files_text": omit_files_text,
         "has_entities": bool(structured_spec.entities),
+        "types_text": types_text,
+        "type_registry": type_registry,
     }
 
     # S4D inputs - prepare list of individual tool dicts for parallel processing
@@ -217,10 +244,18 @@ def _prepare_step4_inputs(
     }
 
 
-def _format_entities_for_s4c(entities: list[EntitySpec]) -> str:
+def _format_entities_for_s4c(entities: list[EntitySpec], type_registry: dict | None = None) -> str:
+    """
+    Format entities for S4C input.
+
+    Args:
+        entities: List of EntitySpec to format
+        type_registry: Optional GlobalVarRegistry dict mapping type names to definitions
+    """
     if not entities:
         return "(No entities found)"
 
+    type_registry = type_registry or {}
     variables = [e for e in entities if e.kind != "Artifact"]
     files = [e for e in entities if e.kind == "Artifact"]
     lines = []
@@ -238,6 +273,11 @@ def _format_entities_for_s4c(entities: list[EntitySpec]) -> str:
             lines.append(f"Provenance: {e.provenance}")
             if e.source_text:
                 lines.append(f"Source: {e.source_text[:120]}")
+            # Include type definition from registry if available
+            if type_registry and e.type_name in type_registry:
+                type_def = type_registry[e.type_name]
+                if isinstance(type_def, dict) and "definition" in type_def:
+                    lines.append(f"TypeDefinition: {type_def['definition']}")
             lines.append("")
 
     if files:
@@ -253,7 +293,47 @@ def _format_entities_for_s4c(entities: list[EntitySpec]) -> str:
             lines.append(f"Provenance: {e.provenance}")
             if getattr(e, "from_omit_files", False):
                 lines.append("Note: Sourced from P1 omit-files (priority=3)")
+            # Include type definition from registry if available
+            if type_registry and e.type_name in type_registry:
+                type_def = type_registry[e.type_name]
+                if isinstance(type_def, dict) and "definition" in type_def:
+                    lines.append(f"TypeDefinition: {type_def['definition']}")
             lines.append("")
+
+    return "\n".join(lines)
+
+
+def _format_types_for_s4c(type_registry: dict | None = None) -> str:
+    """
+    Format type definitions from GlobalVarRegistry for S4C input.
+
+    Args:
+        type_registry: Dict mapping type names to type definitions
+                      (GlobalVarRegistry format: {type_name: {description, definition, ...}})
+
+    Returns:
+        Formatted string listing all available types and their definitions
+    """
+    if not type_registry:
+        return "(No types declared)"
+
+    lines = ["TYPES (GlobalVarRegistry - available for variable/file type declarations):"]
+    lines.append("")
+
+    for type_name, type_def in type_registry.items():
+        lines.append(f"Type: {type_name}")
+        if isinstance(type_def, dict):
+            if "description" in type_def:
+                lines.append(f"  Description: {type_def['description']}")
+            if "definition" in type_def:
+                lines.append(f"  Definition: {type_def['definition']}")
+            # Include any other relevant fields
+            for key, value in type_def.items():
+                if key not in ("description", "definition") and isinstance(value, str):
+                    lines.append(f"  {key}: {value}")
+        elif isinstance(type_def, str):
+            lines.append(f"  Definition: {type_def}")
+        lines.append("")
 
     return "\n".join(lines)
 
