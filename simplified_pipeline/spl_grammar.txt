@@ -73,34 +73,6 @@ Inputs and outputs of an example should match the INPUTS and OUTPUTS schema.
 The example workflow should be a feasible execution path of the declared MAIN_FLOW, ALTERNATIVE_FLOW and/or EXCEPTION_FLOW.
 """
 
-EXAMPLES := "[EXAMPLES]" { EXPECTED_WORKER_BEHAVIOR | DEFECT_WORKER_BEHAVIOR } "[END_EXAMPLES]"
-
-"""
-An EXPECTED_WORKER_BEHAVIOR is meant to illustrate how the worker should correctly respond (i.e., expected behavior and output ) to both valid and invalid inputs (if applicable) as per its defined logic.
-"""
-EXPECTED_WORKER_BEHAVIOR := "<EXPECTED-WORKER-BEHAVIOR>" "{" EXPECTED_WORKER_BEHAVIOR_DETAILS "}" "</EXPECTED-WORKER-BEHAVIOR>"
-EXPECTED_WORKER_BEHAVIOR_DETAILS :=  INPUT_EXAMPLE"," EXPECTED_OUTPUT_EXAMPLE "," EXECUTION_PATH
-INPUT_EXAMPLE := "inputs:" "{" VAR_VALUE_PAIRS "}" """The input parameters provided to the worker"""
-VAR_VALUE_PAIRS := VAR_NAME ":" VALUE {"," VAR_VALUE_PAIRS}
-EXPECTED_OUTPUT_EXAMPLE := "expected-outputs:" "{" VAR_VALUE_PAIRS "}" """Specifies the expected correct outputs for the given inputs"""
-EXECUTION_PATH := "execution-path:" COMMAND_DECISION_INDEX {"," COMMAND_DECISION_INDEX} """Documents the sequence of commands and decisions (e.g., C-1, D-1, C-3) followed within the worker's logic to produce the outputs"""
-COMMAND_DECISION_INDEX := COMMAND_INDEX | DECISION_INDEX
-
-"""
-A DEFECT_WORKER_BEHAVIOR is meant to illustrate how the worker malfunctions and thus incorrectly respond (i.e., erroneous behavior and output ) to both valid and invalid inputs (if applicable) as per its defined logic.
-
-DEFECT_TYPE definition:
--) Processing Logic Error pertains to the core operational logic, where the system fails to correctly process inputs due to logic flaws.
--) Error Handling Error relates to the system's inability to correctly identify and respond to invalid inputs or states.
--) Output Generation Error involves issues with producing the correct output format or content, even if the input was correctly processed.
--) Input Specification Error involves failures in meeting the worker's input specifications
-"""
-DEFECT_WORKER_BEHAVIOR := "<DEFECT-WORKER-BEHAVIOR>" "{" DEFECT_WORKER_BEHAVIOR_DETAILS "}" "</DEFECT-WORKER-BEHAVIOR>""
-DEFECT_WORKER_BEHAVIOR_DETAILS := DEFECT_TYPE "," INPUT_EXAMPLE"," DEFECT_OUTPUT_EXAMPLE "," EXECUTION_PATH "," DEFECT_EXPLANATION
-MALFUNCTION_TYPE := "Processing Logic Error" | "Invalid Input Handling Error" | "Output Generation Error" | "Input Specification Error" """"Types of defects in the worker's operation that result in the errors"""
-DEFECT_OUTPUT_EXAMPLE := "defect-outputs:" "{" VAR_VALUE_PAIRS "}" """The outputs that incorrectly result from the defect"""
-DEFECT_EXPLANATION := "defect-explanation:" STATIC_DESCRIPTION """A short description of why the output is incorrect given the specific defect."""
-
 MAIN_FLOW := "[MAIN_FLOW]" {BLOCK} [END_MAIN_FLOW]
 ALTERNATIVE_FLOW := "[ALTERNATIVE_FLOW:" CONDITION "]" {BLOCK} "[END_ALTERNATIVE_FLOW]"
 EXCEPTION_FLOW := "[EXCEPTION_FLOW:" CONDITION "]" ["LOG" DESCRIPTION_WITH_REFERENCES] {BLOCK} "[END_EXCEPTION_FLOW]"
@@ -133,6 +105,36 @@ INSTRUCTION_NAME := WORKER_NAME
 ARGUMENT_LIST := STRUCTURED_TEXT
 
 COMMAND_RESULT := VAR_NAME ":" DATA_TYPE | REFERENCE """VAR_NAME ":" DATA_TYPE essentially declares a temporary variable"""
+
+
+EXAMPLES := "[EXAMPLES]" { EXPECTED_WORKER_BEHAVIOR | DEFECT_WORKER_BEHAVIOR } "[END_EXAMPLES]"
+
+"""
+An EXPECTED_WORKER_BEHAVIOR is meant to illustrate how the worker should correctly respond (i.e., expected behavior and output ) to both valid and invalid inputs (if applicable) as per its defined logic.
+"""
+EXPECTED_WORKER_BEHAVIOR := "<EXPECTED-WORKER-BEHAVIOR>" "{" EXPECTED_WORKER_BEHAVIOR_DETAILS "}" "</EXPECTED-WORKER-BEHAVIOR>"
+EXPECTED_WORKER_BEHAVIOR_DETAILS :=  INPUT_EXAMPLE"," EXPECTED_OUTPUT_EXAMPLE "," EXECUTION_PATH
+INPUT_EXAMPLE := "inputs:" "{" VAR_VALUE_PAIRS "}" """The input parameters provided to the worker"""
+VAR_VALUE_PAIRS := VAR_NAME ":" VALUE {"," VAR_VALUE_PAIRS}
+EXPECTED_OUTPUT_EXAMPLE := "expected-outputs:" "{" VAR_VALUE_PAIRS "}" """Specifies the expected correct outputs for the given inputs"""
+EXECUTION_PATH := "execution-path:" COMMAND_DECISION_INDEX {"," COMMAND_DECISION_INDEX} """Documents the sequence of commands and decisions (e.g., C-1, D-1, C-3) followed within the worker's logic to produce the outputs"""
+COMMAND_DECISION_INDEX := COMMAND_INDEX | DECISION_INDEX
+
+"""
+A DEFECT_WORKER_BEHAVIOR is meant to illustrate how the worker malfunctions and thus incorrectly respond (i.e., erroneous behavior and output ) to both valid and invalid inputs (if applicable) as per its defined logic.
+
+DEFECT_TYPE definition:
+-) Processing Logic Error pertains to the core operational logic, where the system fails to correctly process inputs due to logic flaws.
+-) Error Handling Error relates to the system's inability to correctly identify and respond to invalid inputs or states.
+-) Output Generation Error involves issues with producing the correct output format or content, even if the input was correctly processed.
+-) Input Specification Error involves failures in meeting the worker's input specifications
+"""
+DEFECT_WORKER_BEHAVIOR := "<DEFECT-WORKER-BEHAVIOR>" "{" DEFECT_WORKER_BEHAVIOR_DETAILS "}" "</DEFECT-WORKER-BEHAVIOR>""
+DEFECT_WORKER_BEHAVIOR_DETAILS := DEFECT_TYPE "," INPUT_EXAMPLE"," DEFECT_OUTPUT_EXAMPLE "," EXECUTION_PATH "," DEFECT_EXPLANATION
+MALFUNCTION_TYPE := "Processing Logic Error" | "Invalid Input Handling Error" | "Output Generation Error" | "Input Specification Error" """"Types of defects in the worker's operation that result in the errors"""
+DEFECT_OUTPUT_EXAMPLE := "defect-outputs:" "{" VAR_VALUE_PAIRS "}" """The outputs that incorrectly result from the defect"""
+DEFECT_EXPLANATION := "defect-explanation:" STATIC_DESCRIPTION """A short description of why the output is incorrect given the specific defect."""
+
 
 DESCRIPTION_WITH_REFERENCES := STATIC_DESCRIPTION {DESCRIPTION_WITH_REFERENCES} | REFERENCE {DESCRIPTION_WITH_REFERENCES}
 STATIC_DESCRIPTION := <word> | <word> <space> STATIC_DESCRIPTION

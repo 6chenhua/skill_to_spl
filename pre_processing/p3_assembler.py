@@ -22,9 +22,53 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
-from models.data_models import FileReferenceGraph, SkillPackage, ToolSpec
+from models.data_models import FileReferenceGraph, SkillPackage, ToolSpec, UnifiedAPISpec
+from pre_processing.unified_api_extractor import extract_unified_apis_with_retry
 
 logger = logging.getLogger(__name__)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Language Support Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Comprehensive set of supported programming languages (markdown code block identifiers)
+SUPPORTED_LANGUAGES = {
+    # Python ecosystem
+    'python', 'py',
+    # JavaScript/TypeScript ecosystem
+    'javascript', 'js', 'typescript', 'ts', 'jsx', 'tsx',
+    # Web markup/styles
+    'html', 'htm', 'css', 'scss', 'sass', 'less', 'svg',
+    # JVM languages
+    'java', 'kotlin', 'kt', 'scala', 'sc', 'groovy',
+    'csharp', 'cs', 'vb', 'fsharp', 'fs',
+    # Systems/C-family
+    'c', 'cpp', 'cxx', 'cc', 'h', 'hpp', 'hxx',
+    'rust', 'rs', 'go', 'golang',
+    'swift', 'objectivec', 'objc', 'm',
+    # Scripting languages
+    'bash', 'sh', 'zsh', 'fish', 'shell',
+    'powershell', 'ps1', 'psm1', 'pwsh',
+    'perl', 'pl', 'pm',
+    'php', 'ruby', 'rb', 'lua',
+    # Functional languages
+    'haskell', 'hs', 'erlang', 'erl', 'elixir', 'ex', 'exs',
+    'clojure', 'clj', 'cljs', 'lisp', 'scheme', 'racket', 'rkt',
+    'ocaml', 'ml', 'fsharp', 'fs',
+    # Data/config languages
+    'sql', 'mysql', 'postgresql', 'postgres', 'sqlite',
+    'yaml', 'yml', 'json', 'toml', 'xml', 'csv', 'tsv',
+    'r', 'matlab', 'octave', 'm', 'sas',
+    # Other modern languages
+    'dart', 'flutter', 'julia', 'nim', 'crystal', 'v', 'zig',
+    'solidity', 'vyper', 'move', 'cairo',
+    'wolfram', 'mathematica', 'wl',
+    # Documentation/markup
+    'markdown', 'md', 'rst', 'asciidoc', 'adoc',
+    'dockerfile', 'docker', 'makefile', 'make', 'cmake',
+    'graphql', 'gql', 'regex', 'diff', 'ini', 'cfg',
+}
 
 
 def _boundary(rel_path: str, role: str, priority_label: str) -> str:
@@ -99,12 +143,13 @@ async def _assemble_skill_package_async(
 
     # Phase 1: Launch all LLM tasks in parallel
     llm_tasks = []
+    unified_api_tasks = []
 
-    # Create tasks for code snippet extraction from docs
+    # Create tasks for unified API extraction (NEW - replaces legacy snippet extraction)
     if client and priority1_tasks:
         for rel_path, content in doc_contents.items():
-            task = _extract_snippets_from_doc_async(content, rel_path, client)
-            llm_tasks.append(("snippet", rel_path, task))
+            task = extract_unified_apis_with_retry(content, rel_path, client, max_retries=3)
+            unified_api_tasks.append(("unified_api", rel_path, task))
 
     # Create tasks for script analysis
     if client and priority2_tasks:
@@ -114,15 +159,95 @@ async def _assemble_skill_package_async(
 
     # Execute all LLM tasks in parallel
     tools: list[ToolSpec] = []
+    unified_apis: list[UnifiedAPISpec] = []
     script_results: dict[str, tuple[Optional[ToolSpec], str, str, Any]] = {}
     results: list[Any] = []
 
-    if llm_tasks:
-        logger.info("[P3/P2.5] Launching %d parallel LLM tasks", len(llm_tasks))
+    if llm_tasks or unified_api_tasks:
+        logger.info("[P3/P2.5] Launching %d parallel LLM tasks (%d unified API)", 
+                    len(llm_tasks), len(unified_api_tasks))
+        
+        # Gather all tasks including unified API extraction
+        all_tasks = [task for _, _, task in llm_tasks + unified_api_tasks]
         results = await asyncio.gather(
-            *[task for _, _, task in llm_tasks],
+            *all_tasks,
             return_exceptions=True,
         )
+
+    # Process results
+    llm_task_count = len(llm_tasks)
+    for i, (task_type, rel_path, _) in enumerate(llm_tasks + unified_api_tasks):
+        result = results[i]
+        if isinstance(result, Exception):
+            logger.warning("[P3/P2.5] Task failed for %s: %s", rel_path, result)
+            if task_type == "script":
+                # Find the node for this script
+                for rp, role, fp, node in priority2_tasks:
+                    if rp == rel_path:
+                        script_results[rel_path] = (None, role, rel_path, node)
+                        break
+                continue
+
+        if task_type == "snippet":
+            # result is list[ToolSpec]
+            if isinstance(result, list) and len(result) > 0 and isinstance(result[0], ToolSpec):
+                snippet_tools = result
+                tools.extend(snippet_tools)
+                if snippet_tools:
+                    logger.info(
+                        "[P3/P2.5] Extracted %d code snippets from %s (legacy)",
+                        len(snippet_tools),
+                        rel_path,
+                    )
+        elif task_type == "unified_api":
+            # result is list[UnifiedAPISpec]
+            if isinstance(result, list) and len(result) > 0:
+                unified_apis.extend(result)
+                logger.info(
+                    "[P3/P2.5] Extracted %d unified APIs from %s",
+                    len(result),
+                    rel_path,
+                )
+        elif task_type == "script":
+            # result is Optional[ToolSpec]
+            if isinstance(result, ToolSpec) or result is None:
+                tool = result
+                for rp, role, fp, node in priority2_tasks:
+                    if rp == rel_path:
+                        script_results[rel_path] = (tool, role, rel_path, node)
+                        break
+
+    # Process script results - only add to tools, NOT to merged_doc_text
+    # API specs are for Step 3B/4D, not for Step 1 structure extraction
+    for rel_path, (tool, role, _, node) in script_results.items():
+        if tool:
+            tools.append(tool)
+            # NOTE: We do NOT add script API specs to merged_doc_text
+            # merged_doc_text is for Step 1 structure extraction (doc content only)
+            # Script API specs are stored in package.tools for Step 3B/4D
+            logger.info("[P3/P2.5] Analyzed script: %s", rel_path)
+        else:
+            logger.warning("[P3/P2.5] Script analysis failed for %s", rel_path)
+
+    merged_doc_text = "\n\n".join(sections)
+
+    logger.info(
+        "[P3] Assembled %d sections, %d tools, %d unified APIs",
+        len(sections),
+        len(tools),
+        len(unified_apis),
+    )
+
+    return SkillPackage(
+        skill_id=graph.skill_id,
+        root_path=graph.root_path,
+        frontmatter=graph.frontmatter,
+        merged_doc_text=merged_doc_text,
+        file_role_map=file_role_map,
+        scripts=[], # Deprecated: use tools instead
+        tools=tools, # Unified API specs from P2.5 (legacy)
+        unified_apis=unified_apis, # NEW: Unified API extraction
+    )
 
     # Process results
     for i, (task_type, rel_path, _) in enumerate(llm_tasks):
@@ -212,14 +337,14 @@ async def _extract_snippets_from_doc_async(
     pattern = r'```(\w+)?\n(.*?)```'
     matches = list(re.finditer(pattern, content, re.DOTALL))
 
-    # Filter valid Python snippets
+    # Filter valid code snippets (any supported language)
     snippet_tasks = []
     for i, match in enumerate(matches):
         language = (match.group(1) or "python").lower()
         code_text = match.group(2).strip()
 
-        if language in ['python', 'py'] and len(code_text) > 50:
-            task = _analyze_code_snippet_async(code_text, i, source_file, client)
+        if language in SUPPORTED_LANGUAGES and len(code_text) > 50:
+            task = _analyze_code_snippet_async(code_text, i, source_file, client, language)
             snippet_tasks.append(task)
 
     if snippet_tasks:
@@ -235,14 +360,14 @@ async def _extract_snippets_from_doc_async(
 
 
 async def _analyze_code_snippet_async(
-    code_text: str, index: int, source_file: str, client
+    code_text: str, index: int, source_file: str, client, language: str = 'python'
 ) -> Optional[ToolSpec]:
-    """Async version: Use LLM to analyze a code snippet."""
+    """Async version: Use LLM to analyze a code snippet in any supported language."""
     try:
-        prompt = f"""Analyze this Python code snippet and extract the API specification.
+        prompt = f"""Analyze this {language} code snippet and extract the API specification.
 
 Code:
-```python
+```{language}
 {code_text[:3000]}
 ```
 
@@ -254,7 +379,7 @@ Extract:
 
 Respond in this exact JSON format:
 {{
-  "name": "function_or_class_name",
+  "name": "{language}:function_or_class_name",
   "input_schema": {{"param1": "type1", "param2": "type2"}},
   "output_schema": "return_type",
   "description": "Short functional description"
@@ -286,81 +411,200 @@ If no function/class found, generate a descriptive name like "process_data" or "
     return None
 
 
+def _detect_language_from_extension(file_path: Path) -> str:
+    """Detect programming language from file extension."""
+    ext = file_path.suffix.lower()
+    ext_map = {
+        '.py': 'python',
+        '.js': 'javascript',
+        '.ts': 'typescript',
+        '.tsx': 'typescript',
+        '.jsx': 'javascript',
+        '.sh': 'bash',
+        '.bash': 'bash',
+        '.zsh': 'zsh',
+        '.ps1': 'powershell',
+        '.rb': 'ruby',
+        '.pl': 'perl',
+        '.php': 'php',
+        '.lua': 'lua',
+        '.rs': 'rust',
+        '.go': 'go',
+        '.java': 'java',
+        '.kt': 'kotlin',
+        '.scala': 'scala',
+        '.clj': 'clojure',
+        '.hs': 'haskell',
+        '.ex': 'elixir',
+        '.exs': 'elixir',
+        '.swift': 'swift',
+        '.c': 'c',
+        '.cpp': 'cpp',
+        '.h': 'c',
+        '.hpp': 'cpp',
+        '.cs': 'csharp',
+        '.fs': 'fsharp',
+        '.r': 'r',
+        '.m': 'matlab',
+        '.jl': 'julia',
+        '.nim': 'nim',
+        '.cr': 'crystal',
+        '.dart': 'dart',
+        '.v': 'v',
+        '.zig': 'zig',
+        '.sol': 'solidity',
+        '.vy': 'vyper',
+    }
+    return ext_map.get(ext, 'python')  # Default to python if unknown
+
+
 async def _analyze_script_file_async(
     file_path: Path, rel_path: str, node: Any, client
 ) -> Optional[ToolSpec]:
     """
     Async version: Analyze a script file using AST + LLM.
+    Supports multiple languages, with AST analysis for Python and LLM fallback for others.
     """
     try:
         source_code = file_path.read_text(encoding="utf-8")
+        language = _detect_language_from_extension(file_path)
 
-        # AST analysis for function signature
-        try:
-            tree = ast.parse(source_code)
-        except SyntaxError as e:
-            logger.warning("[P3/P2.5] Syntax error in %s: %s", rel_path, e)
-            return None
-
-        # Find main function
-        main_func = None
-        for item in tree.body:
-            if isinstance(item, ast.FunctionDef):
-                if item.name in ["main", "run", "execute"]:
-                    main_func = item
-                    break
-                elif main_func is None:
-                    main_func = item
-
-        if not main_func:
-            # No function found - generate a simple spec
-            return ToolSpec(
-                name=file_path.stem,
-                api_type="SCRIPT",
-                url=rel_path,
-                authentication="none",
-                input_schema={},
-                output_schema="void",
-                description=f"Script: {file_path.name}",
-                source_text=source_code[:5000],
-            )
-
-        # Extract input parameters
-        input_schema = {}
-        for arg in main_func.args.args:
-            arg_name = arg.arg
-            arg_type = _infer_type_from_annotation(arg.annotation)
-            input_schema[arg_name] = arg_type
-
-        # Extract return type
-        output_schema = _infer_type_from_annotation(main_func.returns)
-
-        # Use LLM for description (async)
-        description = await _get_script_description_async(source_code[:3000], client)
-
-        return ToolSpec(
-            name=main_func.name,
-            api_type="SCRIPT",
-            url=rel_path,
-            authentication="none",
-            input_schema=input_schema,
-            output_schema=output_schema,
-            description=description,
-            source_text=source_code[:5000],
-        )
+        # Only use AST analysis for Python files
+        if language == 'python':
+            return await _analyze_python_script(source_code, file_path, rel_path, client)
+        else:
+            # For non-Python files, use LLM-based analysis
+            return await _analyze_generic_script(source_code, file_path, rel_path, client, language)
 
     except Exception as e:
         logger.warning("[P3/P2.5] Failed to analyze script %s: %s", rel_path, e)
         return None
 
 
-async def _get_script_description_async(source_code: str, client) -> str:
+async def _analyze_python_script(
+    source_code: str, file_path: Path, rel_path: str, client
+) -> Optional[ToolSpec]:
+    """Analyze a Python script using AST + LLM."""
+    try:
+        tree = ast.parse(source_code)
+    except SyntaxError as e:
+        logger.warning("[P3/P2.5] Syntax error in %s: %s", rel_path, e)
+        return None
+
+    # Find main function
+    main_func = None
+    for item in tree.body:
+        if isinstance(item, ast.FunctionDef):
+            if item.name in ["main", "run", "execute"]:
+                main_func = item
+                break
+        elif main_func is None and isinstance(item, ast.FunctionDef):
+            main_func = item
+
+    if not main_func:
+        # No function found - generate a simple spec
+        return ToolSpec(
+            name=file_path.stem,
+            api_type="SCRIPT",
+            url=rel_path,
+            authentication="none",
+            input_schema={},
+            output_schema="void",
+            description=f"Script: {file_path.name}",
+            source_text=source_code[:5000],
+        )
+
+    # Extract input parameters
+    input_schema = {}
+    for arg in main_func.args.args:
+        arg_name = arg.arg
+        arg_type = _infer_type_from_annotation(arg.annotation)
+        input_schema[arg_name] = arg_type
+
+    # Extract return type
+    output_schema = _infer_type_from_annotation(main_func.returns)
+
+    # Use LLM for description (async)
+    description = await _get_script_description_async(source_code[:3000], client, 'python')
+
+    return ToolSpec(
+        name=main_func.name,
+        api_type="SCRIPT",
+        url=rel_path,
+        authentication="none",
+        input_schema=input_schema,
+        output_schema=output_schema,
+        description=description,
+        source_text=source_code[:5000],
+    )
+
+
+async def _analyze_generic_script(
+    source_code: str, file_path: Path, rel_path: str, client, language: str
+) -> Optional[ToolSpec]:
+    """Analyze a non-Python script using LLM."""
+    try:
+        prompt = f"""Analyze this {language} script and extract the API specification.
+
+Script ({language}):
+```{language}
+{source_code[:3000]}
+```
+
+Extract:
+1. Main function name (or generate a descriptive name)
+2. Input parameters and their types (if applicable)
+3. Output/return type (if applicable)
+4. Short description of what it does
+
+Respond in this exact JSON format:
+{{
+    "name": "function_or_script_name",
+    "input_schema": {{"param1": "type1", "param2": "type2"}},
+    "output_schema": "return_type",
+    "description": "Short functional description"
+}}
+
+Types should be: text, number, boolean, {{ }}, List [ ], or any.
+Use empty objects {{}} for input_schema if the script takes no arguments.
+"""
+        response = await client.async_call_json("analyze_script", "", prompt)
+
+        if isinstance(response, dict):
+            name = response.get("name", file_path.stem)
+            return ToolSpec(
+                name=name,
+                api_type="SCRIPT",
+                url=rel_path,
+                authentication="none",
+                input_schema=response.get("input_schema", {}),
+                output_schema=response.get("output_schema", "void"),
+                description=response.get("description", f"{language} script: {name}"),
+                source_text=source_code[:5000],
+            )
+    except Exception as e:
+        logger.warning("[P3/P2.5] LLM analysis failed for %s: %s", rel_path, e)
+
+    # Fallback: return basic spec
+    return ToolSpec(
+        name=file_path.stem,
+        api_type="SCRIPT",
+        url=rel_path,
+        authentication="none",
+        input_schema={},
+        output_schema="void",
+        description=f"{language.capitalize()} script: {file_path.name}",
+        source_text=source_code[:5000],
+    )
+
+
+async def _get_script_description_async(source_code: str, client, language: str = 'python') -> str:
     """Async version: Use LLM to generate a description for the script."""
     try:
-        prompt = f"""Analyze this Python script and provide a one-line description of its main functionality.
+        prompt = f"""Analyze this {language} script and provide a one-line description of its main functionality.
 
 Script:
-```python
+```{language}
 {source_code[:2000]}
 ```
 
@@ -371,7 +615,7 @@ Respond with just the description, no JSON, no markdown.
             return response.strip()[:200]
     except Exception:
         pass
-    return "Python script"
+    return f"{language.capitalize()} script"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

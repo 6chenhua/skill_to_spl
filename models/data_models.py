@@ -108,6 +108,7 @@ class SkillPackage:
     file_role_map: dict[str, Any] # path → FileRoleEntry dict (serializable)
     scripts: list[ScriptSpec] = field(default_factory=list) # extracted script APIs (DEPRECATED: use tools)
     tools: list[ToolSpec] = field(default_factory=list) # unified API specs for DEFINE_APIS
+    unified_apis: list = field(default_factory=list) # NEW: UnifiedAPISpec objects for multi-function APIs
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -401,12 +402,42 @@ class APISpec:
 
 
 @dataclass
+class FunctionSpec:
+    """
+    A single function specification within a Unified API.
+    Represents one function/method with its signature and metadata.
+    """
+    name: str  # function/method name
+    signature: str  # code snippet or function signature
+    description: str  # function description
+    input_schema: dict[str, str]  # input parameters (param_name -> type)
+    output_schema: str  # return type
+
+
+@dataclass
+class UnifiedAPISpec:
+    """
+    Unified API specification for SPL generation.
+    Aggregates multiple functions from the same library into a single API.
+    """
+    api_id: str  # unique identifier like "pypdf_from_doc1"
+    api_name: str  # PascalCase name for SPL like "PypdfProcessing"
+    primary_library: str  # main library for URL prefix
+    all_libraries: list[str]  # all libraries involved
+    language: str  # programming language
+    functions: list[FunctionSpec]  # all functions in this API
+    combined_source: str  # merged source code for SPL
+    source_file: str  # source MD file path
+
+
+@dataclass
 class APISymbolTable:
     """
     Collection of all API definitions for a skill.
     Built after Step 1, used as input for Step 4E (worker generation).
     """
-    apis: dict[str, APISpec]  # api_name -> APISpec
+    apis: dict[str, APISpec]  # api_name -> APISpec (old format, keep for compatibility)
+    unified_apis: dict[str, UnifiedAPISpec] = field(default_factory=dict)  # new format
 
     def to_text(self) -> str:
         """Render all API definitions as text for S4E input."""

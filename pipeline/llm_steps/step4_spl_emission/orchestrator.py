@@ -13,6 +13,7 @@ from models.data_models import (
     SPLSpec,
     StructuredSpec,
     WorkflowStepSpec,
+    UnifiedAPISpec,
 )
 from pipeline.llm_client import LLMClient
 from pipeline.llm_steps.step4_spl_emission.assembly import _assemble_spl
@@ -46,6 +47,7 @@ def run_step4_spl_emission(
     model: str | None = None,
     types_spl: str = "",
     type_registry: dict | None = None,
+    unified_apis: list[UnifiedAPISpec] | None = None, # NEW: Unified API specs
 ) -> SPLSpec:
     """
     Step 4: Emit the final normalized SPL specification.
@@ -77,6 +79,7 @@ def run_step4_spl_emission(
         model: Optional model override
         types_spl: Optional pre-generated [DEFINE_TYPES:] block SPL text
         type_registry: Optional GlobalVarRegistry dict mapping type names to definitions
+        unified_apis: Optional list of UnifiedAPISpec for unified API generation
     """
     type_registry = type_registry or {}
 
@@ -90,18 +93,24 @@ def run_step4_spl_emission(
         # S4D now launches one LLM call per tool for individual API generation
         logger.info("[Step 4] Phase 1: Launching S4C (variables/files) and S4D (apis per tool) in parallel")
 
-        future_4c = pool.submit(_call_4c, client, s4c_inputs, model=model)
+    future_4c = pool.submit(_call_4c, client, s4c_inputs, model=model)
 
-        # Launch S4D: one LLM call per tool
-        tools_list = s4d_inputs.get("tools_list", [])
-        if s4d_inputs["has_tools"] and tools_list:
-            logger.info("[Step 4] Phase 1: Launching S4D with %d tools (individual LLM calls)", len(tools_list))
-            futures_4d = [pool.submit(_call_4d, client, tool, model=model) for tool in tools_list]
-        else:
-            logger.info("[Step 4] Phase 1: No tools found, S4D skipped")
-            futures_4d = []
+    # Launch S4D: one LLM call per tool
+    # NEW: Prefer unified_apis if available, otherwise fall back to tools_list
+    tools_list = s4d_inputs.get("tools_list", [])
+    if unified_apis:
+        logger.info("[Step 4] Phase 1: Using %d unified APIs for S4D", len(unified_apis))
+        # Use unified APIs - they contain multiple functions per API
+        from pipeline.llm_steps.step1_5_api_generation import _generate_single_unified_api
+        futures_4d = [pool.submit(_generate_single_unified_api, client, api, model) for api in unified_apis]
+    elif s4d_inputs["has_tools"] and tools_list:
+        logger.info("[Step 4] Phase 1: Launching S4D with %d tools (individual LLM calls)", len(tools_list))
+        futures_4d = [pool.submit(_call_4d, client, tool, model=model) for tool in tools_list]
+    else:
+        logger.info("[Step 4] Phase 1: No tools found, S4D skipped")
+        futures_4d = []
 
-        # -- Phase 2: When S4C completes, extract symbol table and launch S4A + S4B --
+    # -- Phase 2: When S4C completes, extract symbol table and launch S4A + S4B --
         # Note: We don't wait for S4D here - this is the key optimization!
         logger.info("[Step 4] Phase 2: Waiting for S4C to extract symbol table...")
         block_4c = future_4c.result()
@@ -110,76 +119,6 @@ def run_step4_spl_emission(
         symbol_table_text = _format_symbol_table(symbol_table)
         logger.info("[Step 4] Symbol table extracted - types: %d, variables: %d, files: %d",
             len(symbol_table.get("types", [])), len(symbol_table["variables"]), len(symbol_table["files"]))
-
-        # Launch S4A and S4B immediately (they only need symbol_table, not apis_spl)
-        logger.info("[Step 4] Phase 2: Launching S4A (persona) and S4B (constraints) in parallel")
-        future_4a = pool.submit(_call_4a, client, s4a_inputs, symbol_table_text, model=model)
-        future_4b = pool.submit(_call_4b, client, s4b_inputs, symbol_table_text, model=model)
-
-        # -- Phase 3: Wait for all S4D calls to complete, then launch S4E ----------------
-        # S4E needs both symbol_table (ready) and apis_spl (from S4D - now multiple results)
-        logger.info("[Step 4] Phase 3: Waiting for S4D to complete...")
-        block_4d_parts = [f.result() for f in futures_4d] if futures_4d else []
-        block_4d = "\n\n".join(block_4d_parts) if block_4d_parts else ""
-        logger.info("[Step 4] Phase 3: S4D completed - %d API definitions generated", len(block_4d_parts))
-
-        logger.info("[Step 4] Phase 3: Launching S4E (worker)")
-        future_4e = pool.submit(_call_4e, client, s4e_inputs, symbol_table_text, block_4d, model=model)
-
-        # -- Phase 4: Collect S4A and S4B results ------------------------------
-        # These may have already completed while we were waiting for S4D
-        block_4a = future_4a.result()
-        block_4b = future_4b.result()
-
-        # -- Phase 5: Wait for S4E, then launch S4F ----------------------------
-        logger.info("[Step 4] Phase 4: Waiting for S4E to complete...")
-        block_4e = future_4e.result()
-
-        block_4f = ""
-        if s4f_inputs["has_examples"]:
-            logger.info("[Step 4] Phase 5: Generating S4F (examples)")
-            block_4f = _call_4f(client, s4f_inputs, block_4e, model=model)
-
-        # -- Assemble final SPL -----------------------------------------------
-        spl_text = _assemble_spl(
-            skill_id, "", block_4a, block_4b, block_4c, block_4d, block_4e, block_4f
-        )
-        review_summary = _build_review_summary()
-        clause_counts = {}
-
-        logger.info("[Step 4] SPL assembled (%d chars)", len(spl_text))
-        return SPLSpec(
-            skill_id=skill_id,
-            spl_text=spl_text,
-            review_summary=review_summary,
-            clause_counts=clause_counts,
-        )
-
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        # -- Phase 1: Launch S4C and S4D immediately (they are independent) ------
-        # S4D now launches one LLM call per tool for individual API generation
-        logger.info("[Step 4] Phase 1: Launching S4C (variables/files) and S4D (apis per tool) in parallel")
-
-        future_4c = pool.submit(_call_4c, client, s4c_inputs, model=model)
-
-        # Launch S4D: one LLM call per tool
-        tools_list = s4d_inputs.get("tools_list", [])
-        if s4d_inputs["has_tools"] and tools_list:
-            logger.info("[Step 4] Phase 1: Launching S4D with %d tools (individual LLM calls)", len(tools_list))
-            futures_4d = [pool.submit(_call_4d, client, tool, model=model) for tool in tools_list]
-        else:
-            logger.info("[Step 4] Phase 1: No tools found, S4D skipped")
-            futures_4d = []
-
-        # -- Phase 2: When S4C completes, extract symbol table and launch S4A + S4B --
-        # Note: We don't wait for S4D here - this is the key optimization!
-        logger.info("[Step 4] Phase 2: Waiting for S4C to extract symbol table...")
-        block_4c = future_4c.result()
-
-        symbol_table = _extract_symbol_table(block_4c)
-        symbol_table_text = _format_symbol_table(symbol_table)
-        logger.info("[Step 4] Symbol table extracted - variables: %d, files: %d",
-                    len(symbol_table["variables"]), len(symbol_table["files"]))
 
         # Launch S4A and S4B immediately (they only need symbol_table, not apis_spl)
         logger.info("[Step 4] Phase 2: Launching S4A (persona) and S4B (constraints) in parallel")

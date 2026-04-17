@@ -18,16 +18,21 @@ def _assemble_spl(
     block_4d: str,
     block_4e: str,
     block_4f: str,
+    types_spl: str = "",
 ) -> str:
     """Concatenate all blocks in canonical SPL order, wrapping with DEFINE_AGENT.
 
     Final structure:
-        [DEFINE_AGENT: AGENT_NAME "description"]
-        # SPL_PROMPT content (blocks 4a-4f)
-        [END_AGENT]
+    [DEFINE_AGENT: AGENT_NAME "description"]
+    [DEFINE_TYPES:] (from types_spl, if provided)
+    # SPL_PROMPT content (blocks 4a-4f)
+    [END_AGENT]
 
     block_4f ([EXAMPLES] block) is inserted INSIDE the WORKER, before [END_WORKER].
     If [END_WORKER] is not found, 4f is appended separately.
+
+    Args:
+        types_spl: Optional [DEFINE_TYPES:] block from Step 3-T
     """
     # Insert S4F [EXAMPLES] block into the WORKER before [END_WORKER]
     worker_block = _strip_fences(block_4e.strip())
@@ -62,7 +67,17 @@ def _assemble_spl(
         agent_name = _to_pascal_case(skill_id)
         define_agent_line = f"[DEFINE_AGENT: {agent_name}]"
 
-    final_spl = header + define_agent_line + "\n\n" + spl_prompt_content + "\n\n[END_AGENT]"
+    # Include types_spl if provided (from Step 3-T)
+    types_block = _strip_fences(types_spl.strip()) if types_spl else ""
+
+    # Assemble final SPL with proper ordering
+    # Order: DEFINE_AGENT -> TYPES -> 4a-4f -> END_AGENT
+    spl_blocks = [define_agent_line]
+    if types_block:
+        spl_blocks.append(types_block)
+    spl_blocks.append(spl_prompt_content)
+
+    final_spl = header + "\n\n".join(spl_blocks) + "\n\n[END_AGENT]"
 
     # Format SPL indentation, ensure using standard 4-space indentation
     final_spl = format_spl_indentation(final_spl)

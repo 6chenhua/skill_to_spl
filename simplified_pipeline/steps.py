@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from .models import (
     AlternativeFlowSpec,
@@ -32,14 +32,31 @@ logger = logging.getLogger(__name__)
 
 def run_step1_structure_extraction(
     merged_doc_text: str,
-    client: LLMClient
+    client: LLMClient,
+    guidance: Optional[Any] = None,  # NEW: SectionGuidance from Step 0
 ) -> SectionBundle:
     """
     Step 1: Parse merged document into 5 canonical sections.
     
-    Extracts: INTENT, WORKFLOW, CONSTRAINTS, EXAMPLES, NOTES
+    Args:
+        merged_doc_text: The merged document text
+        client: LLM client for extraction
+        guidance: Optional SectionGuidance from Step 0 clarification
+    
+    Returns:
+        SectionBundle with sections assigned according to guidance
     """
-    user_prompt = prompts.render_step1_user(merged_doc_text)
+    # Format guidance for prompt if available
+    guidance_section = ""
+    if guidance is not None and hasattr(guidance, 'clarification_applied'):
+        if guidance.clarification_applied:
+            from .clarification.step0_orchestrator import format_guidance_for_prompt
+            guidance_section = format_guidance_for_prompt(guidance)
+    
+    user_prompt = prompts.render_step1_user(
+        merged_doc_text=merged_doc_text,
+        guidance_section=guidance_section,
+    )
     
     raw = client.call_json(
         step_name="step1_structure_extraction",

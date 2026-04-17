@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 def run_step0_structural_clarification(
     merged_doc_text: str,
-    ui: Optional[ClarificationUI] = None,
+    ui: Optional[StructuralClarificationUI] = None,
     max_questions: int = 5,
     confidence_threshold: float = 0.6,
 ) -> SectionGuidance:
@@ -66,10 +66,9 @@ def run_step0_structural_clarification(
     
     session_id = f"guidance_{uuid.uuid4().hex[:8]}"
     
-    # Import UI here to avoid circular dependency
+    # Use structural UI
     if ui is None:
-        from .ui import ConsoleClarificationUI
-        ui = ConsoleClarificationUI()
+        ui = ConsoleStructuralClarificationUI()
     
     logger.info(f"[{session_id}] Starting structural clarification...")
     
@@ -129,8 +128,8 @@ def run_step0_structural_clarification(
         
         # Collect response
         try:
-            response = ui.collect_response(question)
-            
+            response: StructuralResponse = ui.collect_response(question)
+
             # Parse response to get selected section
             if response.selected_option:
                 # Find which section this option corresponds to

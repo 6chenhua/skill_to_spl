@@ -23,7 +23,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-from models.data_models import APISpec, APISymbolTable, ToolSpec
+from models.data_models import APISpec, APISymbolTable, ToolSpec, UnifiedAPISpec, FunctionSpec
 from pipeline.llm_client import LLMClient
 from prompts import templates
 
@@ -290,3 +290,238 @@ def merge_api_spl_blocks(api_table: APISymbolTable) -> str:
     parts.append("[END_APIS]")
 
     return "\n\n".join(parts)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Unified API Generation (New)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def generate_unified_api_definitions(
+    unified_apis: list[UnifiedAPISpec],
+    client: LLMClient,
+    max_workers: int = 4,
+    model: Optional[str] = None,
+) -> APISymbolTable:
+    """
+    Generate DEFINE_APIS blocks for UnifiedAPISpec objects.
+
+    Args:
+        unified_apis: List of UnifiedAPISpec from unified API extraction
+        client: LLM client for making calls
+        max_workers: Max parallel workers for API generation
+        model: Optional model override. If None, uses client's default model.
+
+    Returns:
+        APISymbolTable containing all generated API definitions
+    """
+    if not unified_apis:
+        logger.info("[Step 1.5 Unified] No unified APIs to generate")
+        return APISymbolTable(apis={}, unified_apis={})
+
+    logger.info("[Step 1.5 Unified] Generating API definitions for %d unified APIs...", len(unified_apis))
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        # Launch one LLM call per unified API in parallel
+        futures = {
+            api.api_name: pool.submit(_generate_single_unified_api, client, api, model)
+            for api in unified_apis
+        }
+
+        # Collect results
+        apis = {}
+        unified_apis_dict = {}
+        for api_name, future in futures.items():
+            try:
+                api_spec = future.result()
+                if api_spec:
+                    apis[api_name] = api_spec
+                    # Also store in unified_apis dict
+                    unified_api = next((u for u in unified_apis if u.api_name == api_name), None)
+                    if unified_api:
+                        unified_apis_dict[api_name] = unified_api
+                    logger.debug("[Step 1.5 Unified] Generated API: %s", api_name)
+            except Exception as exc:
+                logger.error("[Step 1.5 Unified] Failed to generate API for %s: %s", api_name, exc)
+                # Continue with other APIs even if one fails
+
+    logger.info("[Step 1.5 Unified] Generated %d/%d unified API definitions", len(apis), len(unified_apis))
+    return APISymbolTable(apis=apis, unified_apis=unified_apis_dict)
+
+
+def _generate_single_unified_api(
+    client: LLMClient,
+    unified_api: UnifiedAPISpec,
+    model: Optional[str] = None,
+) -> APISpec | None:
+    """
+    Generate DEFINE_API block for a single UnifiedAPISpec.
+
+    Args:
+        client: LLM client
+        unified_api: UnifiedAPISpec with multiple functions
+        model: Optional model override. If None, uses client's default model.
+
+    Returns:
+        APISpec with generated SPL containing multiple functions
+    """
+    try:
+        # Prepare unified API info as JSON for the LLM
+        functions_json = []
+        for func in unified_api.functions:
+            func_info = {
+                "name": func.name,
+                "signature": func.signature,
+                "description": func.description,
+                "input_schema": func.input_schema,
+                "output_schema": func.output_schema,
+                "url": _generate_function_url(unified_api.primary_library, func.name),
+            }
+            functions_json.append(func_info)
+
+        api_info = {
+            "api_name": unified_api.api_name,
+            "primary_library": unified_api.primary_library,
+            "all_libraries": unified_api.all_libraries,
+            "language": unified_api.language,
+            "functions": functions_json,
+            "combined_source": unified_api.combined_source[:2000],  # Truncate for token limit
+        }
+        api_json = json.dumps(api_info, indent=2, ensure_ascii=False)
+
+        # Call LLM to generate DEFINE_API block
+        spl_text = client.call(
+            step_name="step1_5_unified_api_generation",
+            system=_UNIFIED_API_SYSTEM_PROMPT,
+            user=_render_unified_api_user(api_json),
+            model=model,
+        )
+
+        # Parse I/O schemas from the first function as representative
+        input_params = _parse_input_schema(unified_api.functions[0].input_schema) if unified_api.functions else []
+        output_params = _parse_output_schema(unified_api.functions[0].output_schema) if unified_api.functions else []
+
+        return APISpec(
+            name=unified_api.api_name,
+            spl_text=spl_text,
+            input_params=input_params,
+            output_params=output_params,
+            description=f"Unified API for {', '.join(unified_api.all_libraries)}",
+        )
+
+    except Exception as exc:
+        logger.error("[Step 1.5 Unified] Error generating API for %s: %s", unified_api.api_name, exc)
+        return None
+
+
+def _generate_function_url(primary_library: str, function_name: str) -> str:
+    """Generate URL for a function in the format library.function."""
+    return f"{primary_library}.{function_name}"
+
+
+_UNIFIED_API_SYSTEM_PROMPT = """You are an expert SPL (Skill Processing Language) generator.
+
+Your task is to generate a DEFINE_API block for a unified API that contains multiple functions from one or more libraries.
+
+Key requirements:
+1. The API name should be in PascalCase
+2. Each function should have a descriptive name and URL in format: library.Class.method
+3. Include all functions from the unified API spec
+4. Use controlled-input and controlled-output appropriately
+5. Follow the exact SPL grammar format
+
+Output ONLY the API declaration block, no markdown, no code fences."""
+
+
+def _render_unified_api_user(api_json: str) -> str:
+    """Render user prompt for unified API generation."""
+    return f"""Generate a unified API declaration for this specification:
+
+## Unified API Specification (JSON)
+
+{api_json}
+
+## Output Format
+
+Generate a single API declaration with multiple functions:
+
+ApiName<none>
+{{ }}
+{{
+  functions: [
+    {{
+      name: "FunctionName",
+      url: "library.Class.method",
+      description: "What this function does",
+      parameters: {{
+        parameters: [
+          {{required: true, name: "param1", type: text}}
+        ],
+        controlled-input: false
+      }},
+      return: {{
+        type: ReturnType,
+        controlled-output: false
+      }}
+    }},
+    ... (more functions)
+  ]
+}}
+
+Generate ONLY the API declaration, no wrapper."""
+
+
+async def _generate_single_unified_api_async(
+    client: LLMClient,
+    unified_api: UnifiedAPISpec,
+    model: Optional[str] = None,
+) -> APISpec | None:
+    """
+    Async version: Generate DEFINE_API block for a single UnifiedAPISpec.
+    """
+    try:
+        # Prepare unified API info as JSON for the LLM
+        functions_json = []
+        for func in unified_api.functions:
+            func_info = {
+                "name": func.name,
+                "signature": func.signature,
+                "description": func.description,
+                "input_schema": func.input_schema,
+                "output_schema": func.output_schema,
+                "url": _generate_function_url(unified_api.primary_library, func.name),
+            }
+            functions_json.append(func_info)
+
+        api_info = {
+            "api_name": unified_api.api_name,
+            "primary_library": unified_api.primary_library,
+            "all_libraries": unified_api.all_libraries,
+            "language": unified_api.language,
+            "functions": functions_json,
+            "combined_source": unified_api.combined_source[:2000],
+        }
+        api_json = json.dumps(api_info, indent=2, ensure_ascii=False)
+
+        # Call LLM to generate DEFINE_API block (async)
+        spl_text = await client.async_call(
+            step_name="step1_5_unified_api_generation",
+            system=_UNIFIED_API_SYSTEM_PROMPT,
+            user=_render_unified_api_user(api_json),
+            model=model,
+        )
+
+        # Parse I/O schemas
+        input_params = _parse_input_schema(unified_api.functions[0].input_schema) if unified_api.functions else []
+        output_params = _parse_output_schema(unified_api.functions[0].output_schema) if unified_api.functions else []
+
+        return APISpec(
+            name=unified_api.api_name,
+            spl_text=spl_text,
+            input_params=input_params,
+            output_params=output_params,
+            description=f"Unified API for {', '.join(unified_api.all_libraries)}",
+        )
+
+    except Exception as exc:
+        logger.error("[Step 1.5 Unified] Error generating API for %s: %s", unified_api.api_name, exc)
+        return None

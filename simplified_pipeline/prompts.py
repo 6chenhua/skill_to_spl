@@ -56,10 +56,17 @@ warnings that are not normative, references to external documentation.
 
 1. Copy text VERBATIM — never paraphrase or summarize.
 2. If a sentence belongs to more than one category, copy it into each and set
-   "multi": true on every copy.
+"multi": true on every copy.
 3. Record the source filename for every item (use "SKILL.md" if not specified).
 4. Preserve original formatting (bullets, numbering, indentation).
 5. NOTHING may be dropped. If unsure, put it in NOTES.
+
+## Section Assignment Guidance
+
+If a Section Assignment Guidance section is provided, follow these directives:
+- **Direct Assignments**: Use the specified section for listed statements
+- **Section Hints**: Prefer the indicated section for similar ambiguous statements
+- When guidance conflicts with your assessment, trust the guidance (it reflects user clarification)
 
 ## Output Format
 
@@ -92,11 +99,16 @@ STEP1_USER = """\
 ## Document Package
 
 {merged_doc_text}
+
+{guidance_section}
 """
 
 
-def render_step1_user(merged_doc_text: str) -> str:
-    return STEP1_USER.format(merged_doc_text=merged_doc_text)
+def render_step1_user(merged_doc_text: str, guidance_section: str = "") -> str:
+    return STEP1_USER.format(
+        merged_doc_text=merged_doc_text,
+        guidance_section=guidance_section
+    )
 
 
 # ═════════════════════════════════════════════════════════════════════════════

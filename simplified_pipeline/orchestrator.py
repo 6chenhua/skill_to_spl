@@ -17,10 +17,11 @@ from .models import (
     SectionBundle,
     StructuredSpec,
 )
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from .clarification.models import ClarificationContext
-from .llm_client import LLMClient, LLMConfig, SessionUsage
+from .llm_client import LLMConfig
+
+from .clarification.models import ClarificationContext
+from .clarification.structural_models import SectionGuidance
+from .llm_client import LLMClient, SessionUsage
 from .steps import (
     run_step1_structure_extraction,
     run_step3a_variable_extraction,
@@ -74,94 +75,62 @@ class PipelineConfig:
 def run_pipeline(config: PipelineConfig) -> PipelineResult:
     """
     Execute the simplified skill-to-CNL-P pipeline.
-    
+
     Pipeline stages:
-    1. Step 1: Structure Extraction → SectionBundle (5 sections)
-    2. Step 3A: Variable Extraction → list[VariableSpec]
-    3. Step 3B: Workflow Analysis → StructuredSpec
-    4. Step 4: SPL Emission → SPLSpec (simplified, no APIs/no files)
-    
+    1. Step 0: Structural Clarification (NEW - before Step 1)
+    2. Step 1: Structure Extraction → SectionBundle (5 sections)
+    3. Step 3A: Variable Extraction → list[VariableSpec]
+    4. Step 3B: Workflow Analysis → StructuredSpec
+    5. Step 4: SPL Emission → SPLSpec (simplified, no APIs/no files)
+
     Args:
         config: PipelineConfig with merged_doc_text and options
-    
+
     Returns:
         PipelineResult with all intermediate and final outputs
     """
     session_usage = SessionUsage()
     client = LLMClient(config=config.llm_config, session_usage=session_usage)
-    
+
     logger.info(f"=== Simplified pipeline start: {config.skill_id} ===")
-    
+
     # ── Use provided merged document text ────────────────────────────────
     skill_id = config.skill_id
     merged_doc_text = config.merged_doc_text
     logger.info(f"[P0] Using {len(merged_doc_text)} chars of merged document text")
-    
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # STEP 0: Structural Clarification (NEW - runs BEFORE Step 1)
+    # ═════════════════════════════════════════════════════════════════════════
+    structural_guidance: Optional["SectionGuidance"] = None
+    if config.enable_clarification:
+        from .clarification.step0_orchestrator import run_step0_structural_clarification
+        from .clarification.structural_ui import ConsoleStructuralClarificationUI
+
+        logger.info("[Step 0] Running structural clarification...")
+        structural_guidance = run_step0_structural_clarification(
+            merged_doc_text=merged_doc_text,
+            ui=ConsoleStructuralClarificationUI(),
+            max_questions=config.clarification_max_iterations,
+        )
+        _save_checkpoint(config, "step0_guidance", structural_guidance)
+        if structural_guidance.clarification_applied:
+            logger.info(
+                f"[Step 0] Generated guidance with {len(structural_guidance.section_overrides)} overrides"
+            )
+        else:
+            logger.info("[Step 0] No clarification needed")
+    else:
+        logger.info("[Step 0] Structural clarification disabled")
+
     # ── Step 1: Structure Extraction ────────────────────────────────────
     logger.info("[Step 1] Extracting structure...")
     bundle = run_step1_structure_extraction(
         merged_doc_text=merged_doc_text,
         client=client,
+        guidance=structural_guidance,  # NEW: Pass guidance from Step 0
     )
     _save_checkpoint(config, "step1_bundle", bundle)
-
-    # ═════════════════════════════════════════════════════════════════════════
-    # HITL: Clarification (NEW - inserted after Step 1)
-    # ═════════════════════════════════════════════════════════════════════════
-    clarification_context = None
-    if config.enable_clarification:
-        from .clarification import (
-            AmbiguityDetector,
-            QuestionGenerator,
-            SensitivityConfig,
-        )
-        from .clarification.manager import ClarificationManager
-        from .clarification.models import ClarificationContext
-        from .clarification.ui import ConsoleClarificationUI
-
-        logger.info("[HITL] Running ambiguity detection...")
-
-        # Create sensitivity config
-        sensitivity_map = {
-            "low": SensitivityConfig.low,
-            "medium": SensitivityConfig.medium,
-            "high": SensitivityConfig.high,
-        }
-        sensitivity_config = sensitivity_map.get(
-            config.clarification_sensitivity, SensitivityConfig.medium
-        )()
-
-        # Create detector and check if clarification needed
-        detector = AmbiguityDetector(llm_client=client, config=sensitivity_config)
-        detection_result = detector.detect(bundle)
-
-        if detection_result.needs_clarification:
-            logger.info(
-                f"[HITL] Clarification needed: {len(detection_result.markers)} ambiguities, "
-                f"defect_density={detection_result.defect_density:.3f}"
-            )
-
-            # Create question generator and UI
-            question_gen = QuestionGenerator(llm_client=client)
-            ui = ConsoleClarificationUI()
-
-            # Run clarification
-            manager = ClarificationManager(
-                detector=detector,
-                question_generator=question_gen,
-                ui=ui,
-                max_iterations=config.clarification_max_iterations,
-            )
-            clarification_context = manager.run_clarification(bundle)
-
-            # Apply clarifications to bundle
-            bundle = manager.apply_clarifications(bundle, clarification_context)
-
-            # Save checkpoint
-            _save_checkpoint(config, "clarification_context", clarification_context)
-            logger.info("[HITL] Clarification completed")
-        else:
-            logger.info("[HITL] No clarification needed")
 
     # ── Step 3A: Variable Extraction ────────────────────────────────────
     logger.info("[Step 3A] Extracting variables...")
@@ -199,15 +168,15 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
     
     # ── Log token usage ─────────────────────────────────────────────────
     _log_token_usage(session_usage)
-    
+
     result = PipelineResult(
         skill_id=skill_id,
         section_bundle=bundle,
         structured_spec=structured_spec,
         spl_spec=spl_spec,
-        clarification_context=clarification_context,  # NEW
+        structural_guidance=structural_guidance if config.enable_clarification else None,  # NEW: SectionGuidance from Step 0
     )
-    
+
     logger.info(f"=== Pipeline complete: {skill_id} ===")
     return result
 
