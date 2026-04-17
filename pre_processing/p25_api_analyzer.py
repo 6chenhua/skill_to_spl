@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from models.data_models import FileReferenceGraph, ToolSpec
+from models import FileReferenceGraph, ToolSpec
 
 logger = logging.getLogger(__name__)
 

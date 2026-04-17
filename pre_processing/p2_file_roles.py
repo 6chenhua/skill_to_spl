@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from models.data_models import FileReferenceGraph
+from models import FileReferenceGraph
 
 logger = logging.getLogger(__name__)
 

@@ -19,7 +19,7 @@ from typing import Any
 
 import yaml
 
-from models.data_models import FileNode, FileReferenceGraph
+from models import FileNode, FileReferenceGraph
 
 logger = logging.getLogger(__name__)
 
