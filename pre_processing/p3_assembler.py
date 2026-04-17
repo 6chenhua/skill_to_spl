@@ -76,6 +76,52 @@ def _boundary(rel_path: str, role: str, priority_label: str) -> str:
     return f"=== FILE: {rel_path} | role: {role} | priority: {priority_label} ==="
 
 
+def _process_task_result(
+    task_type: str,
+    rel_path: str,
+    result: Any,
+    unified_apis: list,
+    tools: list,
+    script_results: dict,
+    priority2_tasks: list,
+) -> None:
+    """统一处理LLM任务结果。
+
+    Args:
+        task_type: 任务类型 ("unified_api" | "script")
+        rel_path: 相对文件路径
+        result: LLM返回结果或异常
+        unified_apis: 统一的API列表（会被修改）
+        tools: 工具列表（会被修改）
+        script_results: 脚本结果字典（会被修改）
+        priority2_tasks: 优先级2任务列表（用于查找node）
+    """
+    if isinstance(result, Exception):
+        logger.warning("[P3/P2.5] Task failed for %s: %s", rel_path, result)
+        if task_type == "script":
+            for rp, role, fp, node in priority2_tasks:
+                if rp == rel_path:
+                    script_results[rel_path] = (None, role, rel_path, node)
+                    break
+        return
+
+    if task_type == "unified_api":
+        if isinstance(result, list) and len(result) > 0:
+            unified_apis.extend(result)
+            logger.info(
+                "[P3/P2.5] Extracted %d unified APIs from %s",
+                len(result),
+                rel_path,
+            )
+    elif task_type == "script":
+        if isinstance(result, ToolSpec) or result is None:
+            tool = result
+            for rp, role, fp, node in priority2_tasks:
+                if rp == rel_path:
+                    script_results[rel_path] = (tool, role, rel_path, node)
+                    break
+
+
 def assemble_skill_package(
     graph: FileReferenceGraph,
     file_role_map: dict[str, Any],
@@ -174,48 +220,17 @@ async def _assemble_skill_package_async(
             return_exceptions=True,
         )
 
-    # Process results
-    llm_task_count = len(llm_tasks)
+    # Process results using unified handler
     for i, (task_type, rel_path, _) in enumerate(llm_tasks + unified_api_tasks):
-        result = results[i]
-        if isinstance(result, Exception):
-            logger.warning("[P3/P2.5] Task failed for %s: %s", rel_path, result)
-            if task_type == "script":
-                # Find the node for this script
-                for rp, role, fp, node in priority2_tasks:
-                    if rp == rel_path:
-                        script_results[rel_path] = (None, role, rel_path, node)
-                        break
-                continue
-
-        if task_type == "snippet":
-            # result is list[ToolSpec]
-            if isinstance(result, list) and len(result) > 0 and isinstance(result[0], ToolSpec):
-                snippet_tools = result
-                tools.extend(snippet_tools)
-                if snippet_tools:
-                    logger.info(
-                        "[P3/P2.5] Extracted %d code snippets from %s (legacy)",
-                        len(snippet_tools),
-                        rel_path,
-                    )
-        elif task_type == "unified_api":
-            # result is list[UnifiedAPISpec]
-            if isinstance(result, list) and len(result) > 0:
-                unified_apis.extend(result)
-                logger.info(
-                    "[P3/P2.5] Extracted %d unified APIs from %s",
-                    len(result),
-                    rel_path,
-                )
-        elif task_type == "script":
-            # result is Optional[ToolSpec]
-            if isinstance(result, ToolSpec) or result is None:
-                tool = result
-                for rp, role, fp, node in priority2_tasks:
-                    if rp == rel_path:
-                        script_results[rel_path] = (tool, role, rel_path, node)
-                        break
+        _process_task_result(
+            task_type=task_type,
+            rel_path=rel_path,
+            result=results[i],
+            unified_apis=unified_apis,
+            tools=tools,
+            script_results=script_results,
+            priority2_tasks=priority2_tasks,
+        )
 
     # Process script results - only add to tools, NOT to merged_doc_text
     # API specs are for Step 3B/4D, not for Step 1 structure extraction
@@ -247,69 +262,6 @@ async def _assemble_skill_package_async(
         scripts=[], # Deprecated: use tools instead
         tools=tools, # Unified API specs from P2.5 (legacy)
         unified_apis=unified_apis, # NEW: Unified API extraction
-    )
-
-    # Process results
-    for i, (task_type, rel_path, _) in enumerate(llm_tasks):
-        result = results[i]
-        if isinstance(result, Exception):
-            logger.warning("[P3/P2.5] Task failed for %s: %s", rel_path, result)
-            if task_type == "script":
-                # Find the node for this script
-                for rp, role, fp, node in priority2_tasks:
-                    if rp == rel_path:
-                        script_results[rel_path] = (None, role, rel_path, node)
-                        break
-            continue
-
-        if task_type == "snippet":
-            # result is list[ToolSpec]
-            if isinstance(result, list):
-                snippet_tools = result
-                tools.extend(snippet_tools)
-                if snippet_tools:
-                    logger.info(
-                        "[P3/P2.5] Extracted %d code snippets from %s",
-                        len(snippet_tools),
-                        rel_path,
-                    )
-        elif task_type == "script":
-            # result is Optional[ToolSpec]
-            if isinstance(result, ToolSpec) or result is None:
-                tool = result
-                for rp, role, fp, node in priority2_tasks:
-                    if rp == rel_path:
-                        script_results[rel_path] = (tool, role, rel_path, node)
-                        break
-
-    # Process script results - only add to tools, NOT to merged_doc_text
-    # API specs are for Step 3B/4D, not for Step 1 structure extraction
-    for rel_path, (tool, role, _, node) in script_results.items():
-        if tool:
-            tools.append(tool)
-            # NOTE: We do NOT add script API specs to merged_doc_text
-            # merged_doc_text is for Step 1 structure extraction (doc content only)
-            # Script API specs are stored in package.tools for Step 3B/4D
-            logger.info("[P3/P2.5] Analyzed script: %s", rel_path)
-        else:
-            logger.warning("[P3/P2.5] Script analysis failed for %s", rel_path)
-
-    merged_doc_text = "\n\n".join(sections)
-
-    logger.info(
-        "[P3] Assembled %d sections, %d tools (API specs + code snippets)",
-        len(sections),
-        len(tools),
-    )
-
-    return SkillPackage(
-        skill_id=graph.skill_id,
-        root_path=graph.root_path,
-        frontmatter=graph.frontmatter,
-        merged_doc_text=merged_doc_text,
-        file_role_map=file_role_map,
-        scripts=[],  # Deprecated: use tools instead
-        tools=tools,  # Unified API specs from P2.5
     )
 
 

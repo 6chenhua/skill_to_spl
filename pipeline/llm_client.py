@@ -16,10 +16,18 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+from pipeline.exceptions import (
+    ConfigurationError, 
+    suppress_exceptions,
+    get_required_env, 
+    get_optional_env,
+)
 
 try:
     from openai import AsyncOpenAI, OpenAI
@@ -36,14 +44,56 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class LLMConfig:
-    base_url: str = 'https://api.rcouyi.com/v1'
-    api_key: str = "sk-V0s4xmnT70wbwPPe160dBaCc96A74fB9Ae850fFc6dE6136b"
+    """LLM配置类 - 从环境变量读取敏感信息。
+    
+    Required environment variables:
+        LLM_API_KEY: API密钥（必填）
+    
+    Optional environment variables:
+        LLM_BASE_URL: API基础URL（默认: https://api.rcouyi.com/v1）
+        LLM_MODEL: 默认模型（默认: gpt-4o）
+    """
+    # 必填配置（通过__post_init__从环境变量读取）
+    api_key: str = field(default="")
+    base_url: str = field(default="")
+    
+    # 默认配置
     model: str = "gpt-4o"
     max_tokens: int = 8192
-    temperature: float = 0.0 # deterministic for pipeline steps
+    temperature: float = 0.0  # deterministic for pipeline steps
     max_retries: int = 3
-    retry_base_delay: float = 2.0 # seconds; doubles on each retry
-    timeout: float = 120.0 # seconds per request
+    retry_base_delay: float = 2.0  # seconds; doubles on each retry
+    timeout: float = 120.0  # seconds per request
+    
+    def __post_init__(self):
+        """验证和加载配置。"""
+        # API密钥：优先使用传入值，否则从环境变量读取
+        if not self.api_key:
+            try:
+                self.api_key = get_required_env("LLM_API_KEY")
+            except ConfigurationError as e:
+                # 提供更有帮助的错误信息
+                raise ConfigurationError(
+                    f"{e}\n\n"
+                    "To fix this:\n"
+                    "1. Copy .env.example to .env\n"
+                    "2. Fill in your actual API key in .env\n"
+                    "3. Or set LLM_API_KEY environment variable"
+                ) from e
+        
+        # Base URL：优先使用传入值，否则从环境变量读取，最后使用默认值
+        if not self.base_url:
+            self.base_url = get_optional_env(
+                "LLM_BASE_URL", 
+                "https://api.rcouyi.com/v1"
+            )
+        
+        # 验证URL格式
+        if not self.base_url.startswith(("http://", "https://")):
+            raise ConfigurationError(
+                f"Invalid LLM_BASE_URL: {self.base_url}. "
+                "Must start with http:// or https://"
+            )
 
 
 @dataclass
@@ -147,6 +197,7 @@ class LLMClient:
             http_client=self._async_http_client
         )
 
+    @suppress_exceptions
     def close(self) -> None:
         """Close HTTP clients to prevent Windows asyncio cleanup warnings."""
         if self._closed:
@@ -156,8 +207,8 @@ class LLMClient:
         # Close sync client
         try:
             self._http_client.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to close sync HTTP client: %s", e)
 
         # Close async client - must be done carefully on Windows
         try:
@@ -178,17 +229,15 @@ class LLMClient:
                 try:
                     asyncio.run(self._async_http_client.aclose())
                 except RuntimeError:
-                    # Event loop is closed, suppress the error
-                    pass
-        except Exception:
-            pass
+                    # Event loop is closed, log and continue
+                    logger.debug("Event loop already closed, skipping async client cleanup")
+        except Exception as e:
+            logger.debug("Failed to close async HTTP client: %s", e)
 
+    @suppress_exceptions
     def __del__(self) -> None:
         """Cleanup on garbage collection - suppress all errors on Windows."""
-        try:
-            self.close()
-        except Exception:
-            pass
+        self.close()
 
     # ── Raw call ─────────────────────────────────────────────────────────────
 
@@ -225,16 +274,22 @@ class LLMClient:
                         {"role": "user", "content": user}
                     ],
                 )
-                usage = TokenUsage(
-                    input_tokens=response.usage.prompt_tokens,
-                    output_tokens=response.usage.completion_tokens,
-                )
+                # Handle None usage gracefully
+                if response.usage:
+                    usage = TokenUsage(
+                        input_tokens=response.usage.prompt_tokens or 0,
+                        output_tokens=response.usage.completion_tokens or 0,
+                    )
+                else:
+                    usage = TokenUsage(input_tokens=0, output_tokens=0)
+                    logger.warning("[%s] Response usage is None, token tracking disabled", step_name)
                 self.session_usage.record(step_name, usage)
                 logger.debug(
                     "[%s] tokens: in=%d out=%d",
                     step_name, usage.input_tokens, usage.output_tokens,
                 )
-                return response.choices[0].message.content
+                content = response.choices[0].message.content
+                return content if content is not None else ""
 
             except Exception as exc:
                 import openai
