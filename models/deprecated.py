@@ -1,13 +1,12 @@
-"""Data models for the skill-to-CNL-P normalization pipeline (DEPRECATED).
+"""Backward compatibility module for deprecated imports.
 
-⚠️ WARNING: This module is deprecated and will be removed in v3.0.
-Please use the new import path:
+This module provides compatibility for old import paths from models.data_models.
+It forwards all imports to the new models package and issues deprecation warnings.
 
+WARNING: This module will be removed in v3.0. Migrate to use:
     from models import X  # New way
     # Instead of:
     from models.data_models import X  # Old way (deprecated)
-
-This module now forwards all imports to the new models package for backward compatibility.
 """
 
 from __future__ import annotations
@@ -24,94 +23,79 @@ warnings.warn(
     stacklevel=2,
 )
 
-# Forward all imports to the new models package
-# This ensures that `from models.data_models import X` still works
-# but actually imports from the new modular structure
-
+# Import all public symbols from the new models package
 from models import (
     # Base types
     CANONICAL_SECTIONS,
     DEFAULT_PRIORITY_THRESHOLD,
-    FileKind,
     MAX_HEAD_LINES,
     MAX_SCRIPT_COMMENT_LINES,
+    FileKind,
     Priority,
     Provenance,
     Serializable,
     SourceRef,
     Validatable,
-    validate_confidence,
-    validate_priority,
-    validate_provenance,
     # Core types
     CheckResult,
     ReviewItem,
     ReviewSeverity,
     SessionUsage,
     TokenUsage,
-    # Results
-    PipelineConfig,
-    PipelineResult,
     # Preprocessing
     FileNode,
     FileReferenceGraph,
-    ScriptMetadata,
-    ScriptSpec,
     FileRoleEntry,
     FileRoleMap,
     RoleAssignment,
+    ScriptMetadata,
+    ScriptSpec,
     SkillPackage,
     # Step 1
-    SectionItem,
     SectionBundle,
+    SectionItem,
     # Step 3
-    EntitySpec,
-    WorkflowStep,
-    FlowStep,
+    ActionType,
     AlternativeFlow,
+    EntityKind,
+    EntitySpec,
     ExceptionFlow,
+    FlowStep,
     InteractionRequirement,
     InteractionType,
-    StructuredSpec,
     InterfaceSpec,
+    StructuredSpec,
     TypeSpec,
-    VarSpec,
     VarRegistry,
-    ActionType,
-    EntityKind,
+    VarSpec,
+    WorkflowStep,
+    # Step 4
+    SPLAssembly,
+    SPLBlock,
+    SPLSpec,
     # Review
     NeedsReviewItem,
     ValidationResult,
     # API
-    FunctionSpec,
-    UnifiedAPISpec,
     APISpec,
-    ToolSpec,
     APISymbolTable,
-    # Step 4
-    SPLSpec,
-    SPLBlock,
-    SPLAssembly,
+    FunctionSpec,
+    ToolSpec,
+    UnifiedAPISpec,
+    # Results
+    PipelineConfig,
+    PipelineResult,
+    # Validation functions
+    validate_confidence,
+    validate_priority,
+    validate_provenance,
 )
 
 # Backward compatibility aliases
-# Some classes were renamed in the refactoring, provide aliases for the old names
+# These provide compatibility for code that uses the old names
 
-# In old data_models.py, these names were used:
-# - WorkflowStepSpec -> WorkflowStep (renamed)
-# - AlternativeFlowSpec -> AlternativeFlow (renamed)
-# - ExceptionFlowSpec -> ExceptionFlow (renamed)
-# - InteractionRequirement (same name, but in old code)
-# - NeedsReviewItem -> ReviewItem (renamed in our new structure)
-# - StructuredSpec (same)
-
-# Create aliases for backward compatibility
-WorkflowStepSpec = WorkflowStep
-AlternativeFlowSpec = AlternativeFlow
-ExceptionFlowSpec = ExceptionFlow
-
-# Old name for NeedsReviewItem
-NeedsReviewItem = ReviewItem
+# Old interface name (deprecated)
+InterfaceSpec = StructuredSpec
 
 __all__ = [
     # Base
@@ -134,9 +118,6 @@ __all__ = [
     "ReviewItem",
     "ReviewSeverity",
     "CheckResult",
-    # Results
-    "PipelineResult",
-    "PipelineConfig",
     # Preprocessing
     "FileNode",
     "FileReferenceGraph",
@@ -149,26 +130,23 @@ __all__ = [
     # Step 1
     "SectionItem",
     "SectionBundle",
-    # Step 3 - with backward compatibility aliases
+    # Step 3
     "EntitySpec",
     "WorkflowStep",
-    "WorkflowStepSpec",  # alias
     "FlowStep",
     "AlternativeFlow",
-    "AlternativeFlowSpec",  # alias
     "ExceptionFlow",
-    "ExceptionFlowSpec",  # alias
     "InteractionRequirement",
     "InteractionType",
     "StructuredSpec",
-    "InterfaceSpec",
+    "InterfaceSpec",  # Backward compatibility alias
     "TypeSpec",
     "VarSpec",
     "VarRegistry",
     "ActionType",
     "EntityKind",
-    # Review - with backward compatibility alias
-    "NeedsReviewItem",  # alias for ReviewItem
+    # Review
+    "NeedsReviewItem",
     "ValidationResult",
     # Step 4
     "SPLSpec",
@@ -180,9 +158,26 @@ __all__ = [
     "APISpec",
     "ToolSpec",
     "APISymbolTable",
+    # Results
+    "PipelineResult",
+    "PipelineConfig",
 ]
 
 
+# Mark all re-exported symbols as deprecated
+def _deprecate_symbol(name: str) -> None:
+    """Mark a symbol as deprecated."""
+    if name.startswith("_"):
+        return
+    warnings.warn(
+        f"{name} from models.data_models is deprecated. "
+        f"Use 'from models import {name}' instead.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
+# Helper function for migration checking
 def check_migration_status() -> dict[str, Any]:
     """Check if codebase has migrated from old imports.
 
