@@ -13,9 +13,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from models.data_models import (
-    AlternativeFlowSpec,
-    ExceptionFlowSpec,
+from models import (
+    AlternativeFlow,
+    ExceptionFlow,
     SectionBundle,
     SPLSpec,
     ToolSpec,

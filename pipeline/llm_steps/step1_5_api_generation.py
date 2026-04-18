@@ -23,7 +23,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-from models.data_models import APISpec, APISymbolTable, ToolSpec, UnifiedAPISpec, FunctionSpec
+from models import APISpec, APISymbolTable, ToolSpec, UnifiedAPISpec, FunctionSpec
 from pipeline.llm_client import LLMClient
 from prompts import templates
 

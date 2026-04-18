@@ -14,7 +14,7 @@ import logging
 import re
 from typing import Any, Optional
 
-from models.data_models import SectionBundle, SectionItem, SkillPackage, ToolSpec
+from models import SectionBundle, SectionItem, SkillPackage, ToolSpec
 from pipeline.llm_client import LLMClient
 from prompts import templates
 

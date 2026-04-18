@@ -1,0 +1,507 @@
+{
+  "version": "1.0.0",
+  "created_at": "2026-04-17",
+  "last_updated": "2026-04-17",
+  "status": "PENDING_APPROVAL",
+  "phases": [
+    {
+      "phase_id": "phase_1",
+      "name": "Preprocessing Renaming",
+      "description": "Rename preprocessing modules and functions (P1, P2, P3)",
+      "status": "PENDING",
+      "priority": "high",
+      "estimated_duration": "1 week",
+      "start_date": null,
+      "end_date": null,
+      "files": {
+        "to_rename": [
+          {
+            "old_path": "pre_processing/p1_reference_graph.py",
+            "new_path": "pre_processing/preprocessing_reference_graph.py",
+            "status": "pending"
+          },
+          {
+            "old_path": "pre_processing/p2_file_roles.py",
+            "new_path": "pre_processing/preprocessing_file_roles.py",
+            "status": "pending"
+          },
+          {
+            "old_path": "pre_processing/p3_assembler.py",
+            "new_path": "pre_processing/preprocessing_assembler.py",
+            "status": "pending"
+          }
+        ],
+        "functions": [
+          {
+            "old_name": "build_reference_graph",
+            "new_name": "preprocessing_build_reference_graph",
+            "module": "preprocessing_reference_graph.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "_classify_kind",
+            "new_name": "_classify_file_kind",
+            "module": "preprocessing_reference_graph.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "_scan_references",
+            "new_name": "_extract_file_references",
+            "module": "preprocessing_reference_graph.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "_read_head_lines",
+            "new_name": "_read_document_header",
+            "module": "preprocessing_reference_graph.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "_read_head_comment",
+            "new_name": "_read_script_header",
+            "module": "preprocessing_reference_graph.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "assign_file_priorities",
+            "new_name": "preprocessing_resolve_file_roles",
+            "module": "preprocessing_file_roles.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "assemble_skill_package",
+            "new_name": "preprocessing_assemble_package",
+            "module": "preprocessing_assembler.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "_boundary",
+            "new_name": "_create_file_boundary",
+            "module": "preprocessing_assembler.py",
+            "status": "pending"
+          }
+        ]
+      },
+      "acceptance_criteria": [
+        "All preprocessing functions use new naming",
+        "Import paths updated in all dependent modules",
+        "Unit test pass rate 100%",
+        "Integration test pass rate 100%",
+        "Backward compatibility layer functional"
+      ],
+      "tests": {
+        "unit": 15,
+        "integration": 8,
+        "e2e": 2,
+        "completed": 0,
+        "failed": 0,
+        "pending": 25
+      },
+      "dependencies": [],
+      "blockers": [],
+      "notes": "Phase 1 has no dependencies and can start immediately"
+    },
+    {
+      "phase_id": "phase_2",
+      "name": "Step 3 Renaming",
+      "description": "Rename Step 3 modules (t.py, w.py, io.py) and functions",
+      "status": "PENDING",
+      "priority": "high",
+      "estimated_duration": "1 week",
+      "start_date": null,
+      "end_date": null,
+      "files": {
+        "to_rename": [
+          {
+            "old_path": "pipeline/llm_steps/step3/t.py",
+            "new_path": "pipeline/llm_steps/step3/entity_extraction.py",
+            "status": "pending"
+          },
+          {
+            "old_path": "pipeline/llm_steps/step3/w.py",
+            "new_path": "pipeline/llm_steps/step3/workflow_analysis.py",
+            "status": "pending"
+          },
+          {
+            "old_path": "pipeline/llm_steps/step3/io.py",
+            "new_path": "pipeline/llm_steps/step3/io_analysis.py",
+            "status": "pending"
+          }
+        ],
+        "functions": [
+          {
+            "old_name": "run_step3t_types_declaration",
+            "new_name": "step3a_extract_entities",
+            "module": "step3/entity_extraction.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "run_step3w_workflow_analysis",
+            "new_name": "step3b_analyze_workflow",
+            "module": "step3/workflow_analysis.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "run_step3io_global_analysis",
+            "new_name": "step3a_analyze_io_requirements",
+            "module": "step3/io_analysis.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "run_step3_full",
+            "new_name": "step3_execute_full_analysis",
+            "module": "step3/orchestrator.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "run_step3_full_sync",
+            "new_name": "step3_execute_full_analysis_sync",
+            "module": "step3/orchestrator.py",
+            "status": "pending"
+          }
+        ],
+        "data_models": [
+          {
+            "old_name": "Step3WOutput",
+            "new_name": "Step3WorkflowOutput",
+            "module": "models/step3_types.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "Step3IOOutput",
+            "new_name": "Step3IORequirementsOutput",
+            "module": "models/step3_types.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "Step3TOutput",
+            "new_name": "Step3EntityDefinitionsOutput",
+            "module": "models/step3_types.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "WorkflowStepRaw",
+            "new_name": "WorkflowStepDefinition",
+            "module": "models/step3_types.py",
+            "status": "pending"
+          }
+        ]
+      },
+      "acceptance_criteria": [
+        "t.py renamed to entity_extraction.py",
+        "w.py renamed to workflow_analysis.py",
+        "io.py renamed to io_analysis.py",
+        "All Step 3 functions use new naming",
+        "Data models renamed consistently",
+        "Import paths updated",
+        "Unit test pass rate 100%",
+        "Integration test pass rate 100%",
+        "Backward compatibility layer functional"
+      ],
+      "tests": {
+        "unit": 20,
+        "integration": 12,
+        "e2e": 3,
+        "completed": 0,
+        "failed": 0,
+        "pending": 35
+      },
+      "dependencies": ["phase_1"],
+      "blockers": [],
+      "notes": "Must complete Phase 1 first to ensure preprocessing imports work"
+    },
+    {
+      "phase_id": "phase_3",
+      "name": "Step 4 Renaming and Flattening",
+      "description": "Rename Step 4 modules, merge inputs files, rename substep functions",
+      "status": "PENDING",
+      "priority": "high",
+      "estimated_duration": "2 weeks",
+      "start_date": null,
+      "end_date": null,
+      "files": {
+        "to_rename": [
+          {
+            "old_path": "pipeline/llm_steps/step4_spl_emission/substep_calls.py",
+            "new_path": "pipeline/llm_steps/step4_spl_emission/substeps.py",
+            "status": "pending"
+          },
+          {
+            "old_path": "pipeline/llm_steps/step4_spl_emission/s4c_from_registry.py",
+            "new_path": "pipeline/llm_steps/step4_spl_emission/variable_registry.py",
+            "status": "pending"
+          }
+        ],
+        "to_merge": [
+          {
+            "primary": "pipeline/llm_steps/step4_spl_emission/inputs.py",
+            "secondary": "pipeline/llm_steps/step4_spl_emission/inputs_v2.py",
+            "strategy": "merge_v2_into_v1",
+            "status": "pending"
+          }
+        ],
+        "to_delete": [
+          {
+            "path": "pipeline/llm_steps/step4_spl_emission/inputs_v2.py",
+            "after_phase": "phase_3",
+            "status": "pending"
+          }
+        ],
+        "functions": [
+          {
+            "old_name": "_call_4a",
+            "new_name": "step4a_define_persona",
+            "module": "step4_spl_emission/substeps.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "_call_4a_async",
+            "new_name": "step4a_define_persona_async",
+            "module": "step4_spl_emission/substeps.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "_call_4b",
+            "new_name": "step4b_define_constraints",
+            "module": "step4_spl_emission/substeps.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "_call_4b_async",
+            "new_name": "step4b_define_constraints_async",
+            "module": "step4_spl_emission/substeps.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "_call_4c",
+            "new_name": "step4c_define_variables",
+            "module": "step4_spl_emission/substeps.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "_call_4c_async",
+            "new_name": "step4c_define_variables_async",
+            "module": "step4_spl_emission/substeps.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "_call_4d",
+            "new_name": "step4d_define_apis",
+            "module": "step4_spl_emission/substeps.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "_call_4d_async",
+            "new_name": "step4d_define_apis_async",
+            "module": "step4_spl_emission/substeps.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "_call_4e",
+            "new_name": "step4e_assemble_worker",
+            "module": "step4_spl_emission/substeps.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "_call_4e_async",
+            "new_name": "step4e_assemble_worker_async",
+            "module": "step4_spl_emission/substeps.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "_call_4e1_async",
+            "new_name": "step4e1_validate_nesting_async",
+            "module": "step4_spl_emission/substeps.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "_call_4e2_async",
+            "new_name": "step4e2_fix_nesting_async",
+            "module": "step4_spl_emission/substeps.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "_call_4f",
+            "new_name": "step4f_generate_examples",
+            "module": "step4_spl_emission/substeps.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "_call_4f_async",
+            "new_name": "step4f_generate_examples_async",
+            "module": "step4_spl_emission/substeps.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "_call_s0",
+            "new_name": "step4s_define_agent_header",
+            "module": "step4_spl_emission/substeps.py",
+            "status": "pending"
+          }
+        ]
+      },
+      "acceptance_criteria": [
+        "substep_calls.py renamed to substeps.py",
+        "s4c_from_registry.py renamed to variable_registry.py",
+        "inputs.py and inputs_v2.py merged",
+        "All Step 4 substep functions use new naming",
+        "All async functions have _async suffix",
+        "Private functions (_call_*) made public (removed leading underscore)",
+        "Import paths updated",
+        "Unit test pass rate 100%",
+        "Integration test pass rate 100%",
+        "Backward compatibility layer functional"
+      ],
+      "tests": {
+        "unit": 35,
+        "integration": 20,
+        "e2e": 5,
+        "completed": 0,
+        "failed": 0,
+        "pending": 60
+      },
+      "dependencies": ["phase_1", "phase_2"],
+      "blockers": [],
+      "notes": "Most complex phase - requires careful merging of inputs files"
+    },
+    {
+      "phase_id": "phase_4",
+      "name": "Orchestrator and Entry Points",
+      "description": "Update main orchestrator, CLI, and entry points with new naming",
+      "status": "PENDING",
+      "priority": "high",
+      "estimated_duration": "2 weeks",
+      "start_date": null,
+      "end_date": null,
+      "files": {
+        "to_update": [
+          "pipeline/orchestrator.py",
+          "pipeline/orchestrator_async.py",
+          "pipeline/llm_steps/__init__.py",
+          "cli.py",
+          "main.py"
+        ],
+        "functions": [
+          {
+            "old_name": "run_step1_structure_extraction",
+            "new_name": "step1_extract_structure",
+            "module": "llm_steps/__init__.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "run_step4_spl_emission",
+            "new_name": "step4_emit_spl",
+            "module": "llm_steps/__init__.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "run_step4_spl_emission_parallel",
+            "new_name": "step4_emit_spl_parallel",
+            "module": "llm_steps/__init__.py",
+            "status": "pending"
+          },
+          {
+            "old_name": "run_pipeline",
+            "new_name": "pipeline_execute",
+            "module": "orchestrator.py",
+            "status": "pending",
+            "note": "Keep run_pipeline as alias for backward compatibility"
+          },
+          {
+            "old_name": "_to_jsonable",
+            "new_name": "_serialize_to_json",
+            "module": "orchestrator.py",
+            "status": "pending"
+          }
+        ],
+        "exports": {
+          "new": [
+            "preprocessing_build_reference_graph",
+            "preprocessing_resolve_file_roles",
+            "preprocessing_assemble_package",
+            "step1_extract_structure",
+            "step3_execute_full_analysis",
+            "step4_emit_spl",
+            "step4_emit_spl_parallel"
+          ],
+          "deprecated": [
+            "build_reference_graph",
+            "assign_file_priorities",
+            "assemble_skill_package",
+            "run_step1_structure_extraction",
+            "run_step3_full",
+            "run_step4_spl_emission"
+          ]
+        }
+      },
+      "acceptance_criteria": [
+        "Orchestrator updated with new naming",
+        "pipeline.llm_steps __all__ updated with new exports",
+        "CLI entry point functional",
+        "main.py entry point functional",
+        "End-to-end test pass rate 100%",
+        "All example skills pass",
+        "Backward compatibility layer functional",
+        "Documentation updated"
+      ],
+      "tests": {
+        "unit": 15,
+        "integration": 15,
+        "e2e": 10,
+        "completed": 0,
+        "failed": 0,
+        "pending": 40
+      },
+      "dependencies": ["phase_1", "phase_2", "phase_3"],
+      "blockers": [],
+      "notes": "Final phase - requires all previous phases complete"
+    }
+  ],
+  "overall_progress": {
+    "total_phases": 4,
+    "completed_phases": 0,
+    "in_progress_phases": 0,
+    "pending_phases": 4,
+    "total_tests": 160,
+    "tests_passed": 0,
+    "tests_failed": 0,
+    "tests_pending": 160,
+    "files_to_rename": 8,
+    "files_renamed": 0,
+    "functions_to_rename": 37,
+    "functions_renamed": 0
+  },
+  "risks": [
+    {
+      "risk": "Import path breakage",
+      "probability": "high",
+      "impact": "high",
+      "mitigation": "Complete compatibility layer + comprehensive tests"
+    },
+    {
+      "risk": "Performance regression",
+      "probability": "medium",
+      "impact": "medium",
+      "mitigation": "Baseline benchmarks + regression tests"
+    },
+    {
+      "risk": "Developer confusion during transition",
+      "probability": "medium",
+      "impact": "low",
+      "mitigation": "Documentation + migration guide"
+    }
+  ],
+  "git_tags": [],
+  "notes": [
+    "Plan created 2026-04-17",
+    "Status: PENDING_APPROVAL - waiting for user confirmation before starting",
+    "Each phase can be rolled back independently using git tags",
+    "simplified_pipeline/ directory is excluded from this refactor"
+  ],
+  "approval": {
+    "approved": false,
+    "approved_by": null,
+    "approved_at": null,
+    "comments": ""
+  }
+}

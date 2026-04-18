@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Optional
 
 from pipeline.llm_client import LLMClient, LLMConfig, SessionUsage, StepLLMConfig
-from models.data_models import PipelineResult, StructuredSpec
+from models import PipelineResult, StructuredSpec
 from pipeline.llm_steps import (
     run_step1_structure_extraction,
     run_step4_spl_emission,
@@ -66,7 +66,7 @@ from pipeline.spl_formatter import format_spl_indentation
 from pipeline.llm_steps.step4_spl_emission.nesting_validation import (
     validate_and_fix_worker_nesting,
 )
-from models.data_models import EntitySpec
+from models import EntitySpec
 from models.step3_types import GlobalVarRegistry, VarSpec
 
 logger = logging.getLogger(__name__)
@@ -240,12 +240,12 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
         model=_step_model(config, "step3") or config.llm_config.model,
     )
 
-    # Convert WorkflowStepRaw to WorkflowStepSpec for Step 4 compatibility
-    from models.data_models import WorkflowStepSpec, AlternativeFlowSpec, ExceptionFlowSpec, FlowStep
+    # Convert WorkflowStepRaw to WorkflowStep for Step 4 compatibility
+    from models import WorkflowStep, AlternativeFlow, ExceptionFlow, FlowStep
     from models.step3_types import WorkflowStepRaw
 
     workflow_steps = [
-        WorkflowStepSpec(
+        WorkflowStep(
             step_id=s.step_id,
             description=s.description,
             prerequisites=[],  # Will be populated from step_io_specs
@@ -376,7 +376,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
     logger.info("[Output] SPL written to %s", spl_path)
 
     # Build StructuredSpec for backward compatibility with PipelineResult
-    from models.data_models import StructuredSpec, EntitySpec
+    from models import StructuredSpec, EntitySpec
     structured_spec = StructuredSpec(
         entities=[],  # New architecture doesn't produce EntitySpec
         workflow_steps=workflow_steps,

@@ -1,0 +1,296 @@
+{
+  "version": "2.0.0",
+  "created_at": "2026-04-17",
+  "last_updated": "2026-04-17",
+  "status": "PENDING_APPROVAL",
+  "analysis_summary": {
+    "critical_issues": 6,
+    "medium_issues": 2,
+    "minor_issues": 2,
+    "total_lines_affected": "~3000",
+    "files_to_refactor": 15
+  },
+  "phases": [
+    {
+      "phase_id": "phase_a",
+      "name": "Critical Fixes (立即修复)",
+      "description": "修复最严重的架构问题：代码重复、硬编码密钥、错误处理",
+      "status": "PENDING",
+      "priority": "critical",
+      "estimated_duration": "2 weeks",
+      "tasks": [
+        {
+          "task_id": "a1",
+          "name": "修复P3 Assembler重复代码",
+          "location": "pre_processing/p3_assembler.py:200-314",
+          "issue": "完全相同的代码块重复出现",
+          "solution": "提取公共逻辑到_process_task_result()函数",
+          "effort": "2 days",
+          "status": "pending",
+          "acceptance_criteria": [
+            "重复代码消除",
+            "单元测试覆盖率>90%",
+            "功能行为不变"
+          ]
+        },
+        {
+          "task_id": "a2",
+          "name": "移除硬编码API密钥",
+          "location": "pipeline/llm_client.py:39-40",
+          "issue": "API密钥硬编码在代码中",
+          "risk": "密钥泄露、安全风险",
+          "solution": "使用环境变量，添加配置验证",
+          "effort": "1 day",
+          "status": "pending",
+          "acceptance_criteria": [
+            "从代码中移除所有硬编码凭证",
+            "添加.env.example文件",
+            "更新README配置说明",
+            "检查并轮换已泄露的密钥"
+          ]
+        },
+        {
+          "task_id": "a3",
+          "name": "统一错误处理",
+          "location": "多个文件",
+          "issue": "空的except: pass块",
+          "risk": "隐藏异常，难以调试",
+          "solution": "建立统一错误处理策略",
+          "effort": "3 days",
+          "status": "pending",
+          "acceptance_criteria": [
+            "禁止空的except: pass",
+            "至少记录警告日志",
+            "代码审查检查"
+          ]
+        }
+      ]
+    },
+    {
+      "phase_id": "phase_b",
+      "name": "Data Model Refactoring",
+      "description": "拆分models/data_models.py，建立清晰的模块边界",
+      "status": "PENDING",
+      "priority": "high",
+      "estimated_duration": "3 weeks",
+      "tasks": [
+        {
+          "task_id": "b1",
+          "name": "设计新模型结构",
+          "description": "创建新的models/目录结构",
+          "new_structure": [
+            "models/preprocessing/reference.py",
+            "models/preprocessing/roles.py",
+            "models/pipeline/step1.py",
+            "models/pipeline/step3.py",
+            "models/pipeline/step4.py",
+            "models/api.py",
+            "models/core.py"
+          ],
+          "effort": "5 days",
+          "status": "pending"
+        },
+        {
+          "task_id": "b2",
+          "name": "迁移数据模型",
+          "description": "逐步迁移到新模型结构，保持向后兼容",
+          "effort": "10 days",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "phase_id": "phase_c",
+      "name": "Pipeline Architecture Refactoring",
+      "description": "重构pipeline/orchestrator.py，使用Builder模式和Step抽象",
+      "status": "PENDING",
+      "priority": "high",
+      "estimated_duration": "4 weeks",
+      "tasks": [
+        {
+          "task_id": "c1",
+          "name": "创建PipelineBuilder",
+          "description": "实现Builder模式，支持步骤注册和依赖图构建",
+          "new_files": [
+            "pipeline/orchestrator/base.py",
+            "pipeline/orchestrator/builder.py",
+            "pipeline/orchestrator/execution_context.py",
+            "pipeline/orchestrator/step_executor.py"
+          ],
+          "effort": "10 days",
+          "status": "pending"
+        },
+        {
+          "task_id": "c2",
+          "name": "重构主Orchestrator",
+          "description": "拆分238行的run_pipeline函数",
+          "target": "每个函数<50行",
+          "effort": "10 days",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "phase_id": "phase_d",
+      "name": "LLM Client Optimization",
+      "description": "统一async/sync调用，改进错误处理和连接管理",
+      "status": "PENDING",
+      "priority": "medium",
+      "estimated_duration": "2 weeks",
+      "tasks": [
+        {
+          "task_id": "d1",
+          "name": "统一调用模式",
+          "description": "消除substep_calls.py中的90%重复代码",
+          "location": "pipeline/llm_steps/step4_spl_emission/substep_calls.py",
+          "solution": "统一使用async，自动生成sync包装",
+          "effort": "5 days",
+          "status": "pending"
+        },
+        {
+          "task_id": "d2",
+          "name": "连接池管理",
+          "description": "优化HTTP客户端连接管理",
+          "effort": "5 days",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "phase_id": "phase_e",
+      "name": "Integration & Testing",
+      "description": "最终集成、测试和文档更新",
+      "status": "PENDING",
+      "priority": "high",
+      "estimated_duration": "1 week",
+      "tasks": [
+        {
+          "task_id": "e1",
+          "name": "E2E测试",
+          "description": "完整管道测试",
+          "effort": "3 days",
+          "status": "pending"
+        },
+        {
+          "task_id": "e2",
+          "name": "文档更新",
+          "description": "README、架构文档、API文档",
+          "effort": "2 days",
+          "status": "pending"
+        }
+      ]
+    }
+  ],
+  "critical_issues": [
+    {
+      "id": "CI-1",
+      "severity": "critical",
+      "category": "SRP Violation",
+      "title": "Pipeline Orchestrator过于庞大",
+      "location": "pipeline/orchestrator.py:65-403",
+      "description": "run_pipeline函数238行，混合了6个不同职责",
+      "impact": "测试困难、难以理解、扩展困难",
+      "assigned_phase": "phase_c",
+      "status": "pending"
+    },
+    {
+      "id": "CI-2",
+      "severity": "critical",
+      "category": "ISP Violation",
+      "title": "Data Models文件臃肿",
+      "location": "models/data_models.py",
+      "description": "495行包含20+个数据类，职责混杂",
+      "impact": "依赖管理困难、编译时间长",
+      "assigned_phase": "phase_b",
+      "status": "pending"
+    },
+    {
+      "id": "CI-3",
+      "severity": "critical",
+      "category": "DRY Violation",
+      "title": "P3 Assembler代码重复",
+      "location": "pre_processing/p3_assembler.py:200-314",
+      "description": "完全相同的代码块重复出现",
+      "impact": "维护困难、容易引入不一致",
+      "assigned_phase": "phase_a",
+      "status": "pending"
+    },
+    {
+      "id": "CI-4",
+      "severity": "critical",
+      "category": "DRY Violation",
+      "title": "LLM调用模式重复90%+",
+      "location": "pipeline/llm_steps/step4_spl_emission/substep_calls.py",
+      "description": "每个step都有sync和async版本",
+      "impact": "维护双倍工作量",
+      "assigned_phase": "phase_d",
+      "status": "pending"
+    },
+    {
+      "id": "CI-5",
+      "severity": "critical",
+      "category": "Security",
+      "title": "硬编码API密钥",
+      "location": "pipeline/llm_client.py:39-40",
+      "description": "API密钥和URL硬编码在代码中",
+      "impact": "密钥泄露风险、安全漏洞",
+      "assigned_phase": "phase_a",
+      "status": "pending"
+    },
+    {
+      "id": "CI-6",
+      "severity": "critical",
+      "category": "Robustness",
+      "title": "错误处理不当",
+      "location": "多个文件",
+      "description": "空的except: pass块隐藏异常",
+      "impact": "难以调试、隐藏bug",
+      "assigned_phase": "phase_a",
+      "status": "pending"
+    }
+  ],
+  "overall_progress": {
+    "total_phases": 5,
+    "completed_phases": 0,
+    "total_tasks": 13,
+    "completed_tasks": 0,
+    "critical_issues_resolved": 0,
+    "test_coverage": 0
+  },
+  "risks": [
+    {
+      "risk": "模型变更破坏现有代码",
+      "probability": "high",
+      "impact": "high",
+      "mitigation": "分阶段迁移 + 兼容层 + 全面测试",
+      "assigned_phase": "phase_b"
+    },
+    {
+      "risk": "Orchestrator重构引入bug",
+      "probability": "high",
+      "impact": "high",
+      "mitigation": "详细测试 + 特性开关",
+      "assigned_phase": "phase_c"
+    },
+    {
+      "risk": "性能回归",
+      "probability": "medium",
+      "impact": "high",
+      "mitigation": "基准测试 + A/B对比",
+      "assigned_phase": "all"
+    }
+  ],
+  "git_tags": [],
+  "notes": [
+    "v2.0: 基于深度架构分析更新",
+    "识别出6个严重架构问题",
+    "新增Phase A专门处理critical issues",
+    "Status: PENDING_APPROVAL - 等待用户确认"
+  ],
+  "approval": {
+    "approved": false,
+    "approved_by": null,
+    "approved_at": null,
+    "comments": ""
+  }
+}
