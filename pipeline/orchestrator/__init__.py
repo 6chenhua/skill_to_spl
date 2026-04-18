@@ -1,17 +1,25 @@
-"""skill-to-CNL-P pipeline orchestrator (refactored).
+"""Pipeline orchestrator module.
 
-This is the backward-compatible entry point. All logic has been moved to
-pipeline/orchestrator/ module. This file simply re-exports the API.
-
-Migration:
-    The old orchestrator.py (403 lines) has been refactored into a modular
-    architecture under pipeline/orchestrator/ directory.
+This module provides a flexible, extensible pipeline architecture for the
+skill-to-CNL-P transformation pipeline.
 
 Usage:
-    from pipeline.orchestrator import run_pipeline, PipelineConfig
-    from pipeline.llm_client import LLMConfig
-
-    config = PipelineConfig(...)
+    # New architecture (recommended)
+    from pipeline.orchestrator.builder import PipelineBuilder
+    from pipeline.orchestrator.config import PipelineConfig
+    
+    builder = PipelineBuilder()
+    orchestrator = (
+        builder
+        .with_config(config)
+        .with_steps(P1ReferenceGraphStep, P2FileRolesStep, ...)
+        .with_runner("parallel", max_workers=4)
+        .build()
+    )
+    results = orchestrator.run(initial_inputs={})
+    
+    # Backward-compatible API (import from pipeline module directly)
+    from pipeline import run_pipeline, PipelineConfig
     result = run_pipeline(config)
 """
 from __future__ import annotations
@@ -20,32 +28,27 @@ import logging
 from pathlib import Path
 from typing import Any, Optional
 
+# Import new architecture components
+from pipeline.orchestrator.base import PipelineOrchestrator, PipelineStep
+from pipeline.orchestrator.builder import PipelineBuilder
+from pipeline.orchestrator.checkpoint import CheckpointManager
+from pipeline.orchestrator.config import PipelineConfig as NewPipelineConfig
+from pipeline.orchestrator.dependency_graph import DependencyGraph
+from pipeline.orchestrator.execution_context import ExecutionContext
+from pipeline.orchestrator.step_executor import StepExecutor, StepResult
+from pipeline.orchestrator.step_registry import StepRegistry, registry
+
+# Import backward-compatible components
 from pipeline.llm_client import LLMClient, LLMConfig, SessionUsage, StepLLMConfig
 from models import PipelineResult
-
-# Import new architecture components
-from pipeline.orchestrator.builder import PipelineBuilder
-from pipeline.orchestrator.config import PipelineConfig as NewPipelineConfig
-from pipeline.steps import (
-    P1ReferenceGraphStep,
-    P2FileRolesStep,
-    P3AssemblerStep,
-    Step1StructureStep,
-    Step1_5APIGenStep,
-    Step3WorkflowStep,
-    Step4SPLStep,
-)
 
 logger = logging.getLogger(__name__)
 
 
+# Backward-compatible PipelineConfig
 class PipelineConfig:
-    """Configuration for a pipeline run (backward-compatible).
-
-    This class maintains the same API as the original while delegating
-    to the new PipelineConfig internally.
-    """
-
+    """Configuration for a pipeline run (backward-compatible)."""
+    
     def __init__(
         self,
         skill_root: str,
@@ -63,7 +66,7 @@ class PipelineConfig:
         self.save_checkpoints = save_checkpoints
         self.resume_from = resume_from
         self.use_new_step3 = use_new_step3
-
+        
         # Create internal new config
         self._new_config = NewPipelineConfig(
             skill_root=skill_root,
@@ -78,15 +81,22 @@ class PipelineConfig:
 
 def run_pipeline(config: PipelineConfig) -> PipelineResult:
     """Execute the full skill-to-CNL-P pipeline.
-
-    Args:
-        config: PipelineConfig describing the skill to process.
-
-    Returns:
-        PipelineResult with all outputs.
+    
+    Backward-compatible entry point using new architecture.
     """
     logger.info("=== skill-to-CNL-P pipeline start: %s ===", config.skill_root)
-
+    
+    # Import steps here to avoid circular imports
+    from pipeline.steps import (
+        P1ReferenceGraphStep,
+        P2FileRolesStep,
+        P3AssemblerStep,
+        Step1StructureStep,
+        Step1_5APIGenStep,
+        Step3WorkflowStep,
+        Step4SPLStep,
+    )
+    
     # Build and run using new architecture
     builder = PipelineBuilder()
     orchestrator = (
@@ -108,9 +118,9 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
         .with_checkpointing(config.save_checkpoints)
         .build()
     )
-
+    
     results = orchestrator.run(initial_inputs={})
-
+    
     # Build PipelineResult from new architecture results
     return _build_pipeline_result(results, config)
 
@@ -123,7 +133,6 @@ def _build_pipeline_result(
     from models import (
         FileNode,
         FileReferenceGraph,
-        FileRoleEntry,
         FileRoleMap,
         SectionBundle,
         SectionItem,
@@ -134,33 +143,25 @@ def _build_pipeline_result(
         AlternativeFlow,
         ExceptionFlow,
     )
-
+    
     # Get outputs from each step
     p1_output = results.get("p1_reference_graph", {})
     p3_output = results.get("p3_assembler", {})
     step1_output = results.get("step1_structure", {})
     step4_output = results.get("step4_spl", {})
-
+    
     skill_id = p1_output.get("skill_id", Path(config.skill_root).name)
-
+    
     # Reconstruct FileNodes from dicts
     nodes: dict[str, FileNode] = {}
     for node_dict in p1_output.get("nodes", []):
         if isinstance(node_dict, dict):
             node = FileNode(**node_dict)
             nodes[node.path] = node
-
+    
     # Build graph (edges are dict[str, list[str]])
-    edges_dict: dict[str, list[str]] = {}
-    for edge_item in p1_output.get("edges", []):
-        if isinstance(edge_item, dict):
-            src = edge_item.get("source", "")
-            tgt = edge_item.get("target", "")
-            if src and tgt:
-                if src not in edges_dict:
-                    edges_dict[src] = []
-                edges_dict[src].append(tgt)
-
+    edges_dict: dict[str, list[str]] = p1_output.get("edges", {})
+    
     graph = FileReferenceGraph(
         skill_id=skill_id,
         root_path=str(Path(config.skill_root)),
@@ -169,10 +170,10 @@ def _build_pipeline_result(
         nodes=nodes,
         edges=edges_dict,
     )
-
+    
     # Build file role map (empty for now)
     file_role_map: FileRoleMap = {}
-
+    
     # Build skill package
     package = SkillPackage(
         skill_id=skill_id,
@@ -182,7 +183,7 @@ def _build_pipeline_result(
         file_role_map={},
         tools=[],
     )
-
+    
     # Build section bundle
     bundle_dict = step1_output.get("section_bundle", {})
     if bundle_dict:
@@ -198,7 +199,7 @@ def _build_pipeline_result(
         )
     else:
         section_bundle = SectionBundle()
-
+    
     # Build structured spec
     structured_spec_dict = step4_output.get("structured_spec", {})
     workflow_steps = [
@@ -213,14 +214,14 @@ def _build_pipeline_result(
         ExceptionFlow(**ef) if isinstance(ef, dict) else ef
         for ef in structured_spec_dict.get("exception_flows", [])
     ]
-
+    
     structured_spec = StructuredSpec(
-        entities=[],  # New architecture doesn't produce EntitySpec in same way
+        entities=[],
         workflow_steps=workflow_steps,
         alternative_flows=alternative_flows,
         exception_flows=exception_flows,
     )
-
+    
     # Build SPL spec
     spl_spec_dict = step4_output.get("spl_spec", {})
     spl_spec = SPLSpec(
@@ -229,7 +230,7 @@ def _build_pipeline_result(
         review_summary=spl_spec_dict.get("review_summary", {}),
         clause_counts=spl_spec_dict.get("clause_counts", {}),
     )
-
+    
     result = PipelineResult(
         skill_id=skill_id,
         graph=graph,
@@ -239,6 +240,24 @@ def _build_pipeline_result(
         structured_spec=structured_spec,
         spl_spec=spl_spec,
     )
-
+    
     logger.info("=== skill-to-CNL-P pipeline complete ===")
     return result
+
+
+__all__ = [
+    # Backward-compatible API
+    "PipelineConfig",
+    "run_pipeline",
+    # New architecture components
+    "PipelineStep",
+    "PipelineOrchestrator",
+    "PipelineBuilder",
+    "ExecutionContext",
+    "StepExecutor",
+    "StepResult",
+    "StepRegistry",
+    "registry",
+    "DependencyGraph",
+    "CheckpointManager",
+]

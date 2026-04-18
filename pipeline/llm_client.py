@@ -18,15 +18,25 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from pipeline.exceptions import (
-    ConfigurationError, 
+    ConfigurationError,
     suppress_exceptions,
-    get_required_env, 
+    get_required_env,
     get_optional_env,
+    # Structured LLM exceptions
+    LLMError,
+    LLMParseError,
+    LLMRateLimitError,
+    LLMServerError,
+    LLMClientError,
+    LLMConnectionError,
+    LLMRetryExhausted,
+    RetryPolicy,
 )
 
 try:
@@ -43,20 +53,79 @@ logger = logging.getLogger(__name__)
 # ─── Configuration ───────────────────────────────────────────────────────────
 
 @dataclass
+class ConnectionPoolConfig:
+    """HTTP connection pool configuration.
+
+    Configures httpx connection pool limits and timeouts for optimal
+    concurrent performance with LLM API calls.
+
+    Environment variable overrides:
+    - LLM_POOL_MAX_CONNECTIONS: max_connections
+    - LLM_POOL_MAX_KEEPALIVE: max_keepalive_connections
+    - LLM_POOL_CONNECT_TIMEOUT: connect_timeout
+    - LLM_POOL_READ_TIMEOUT: read_timeout
+    - LLM_POOL_WRITE_TIMEOUT: write_timeout
+    - LLM_POOL_POOL_TIMEOUT: pool_timeout
+    - LLM_POOL_KEEPALIVE_EXPIRY: keepalive_expiry
+    - LLM_POOL_HTTP2: http2 (set to "true" or "1" to enable)
+    """
+
+    # Pool limits
+    max_connections: int = 100
+    max_keepalive_connections: int = 20
+
+    # Timeouts
+    connect_timeout: float = 5.0
+    read_timeout: float = 120.0
+    write_timeout: float = 10.0
+    pool_timeout: float = 5.0
+
+    # Keepalive
+    keepalive_expiry: float = 30.0
+
+    # HTTP/2
+    http2: bool = False
+
+    def __post_init__(self):
+        """Apply environment variable overrides."""
+
+        def _env_int(name: str, default: int) -> int:
+            val = os.getenv(name)
+            return int(val) if val is not None else default
+
+        def _env_float(name: str, default: float) -> float:
+            val = os.getenv(name)
+            return float(val) if val is not None else default
+
+        def _env_bool(name: str, default: bool) -> bool:
+            val = os.getenv(name, "").lower()
+            return val in ("true", "1", "yes") if val else default
+
+        self.max_connections = _env_int("LLM_POOL_MAX_CONNECTIONS", self.max_connections)
+        self.max_keepalive_connections = _env_int("LLM_POOL_MAX_KEEPALIVE", self.max_keepalive_connections)
+        self.connect_timeout = _env_float("LLM_POOL_CONNECT_TIMEOUT", self.connect_timeout)
+        self.read_timeout = _env_float("LLM_POOL_READ_TIMEOUT", self.read_timeout)
+        self.write_timeout = _env_float("LLM_POOL_WRITE_TIMEOUT", self.write_timeout)
+        self.pool_timeout = _env_float("LLM_POOL_POOL_TIMEOUT", self.pool_timeout)
+        self.keepalive_expiry = _env_float("LLM_POOL_KEEPALIVE_EXPIRY", self.keepalive_expiry)
+        self.http2 = _env_bool("LLM_POOL_HTTP2", self.http2)
+
+
+@dataclass
 class LLMConfig:
     """LLM配置类 - 从环境变量读取敏感信息。
-    
+
     Required environment variables:
-        LLM_API_KEY: API密钥（必填）
-    
+    LLM_API_KEY: API密钥（必填）
+
     Optional environment variables:
-        LLM_BASE_URL: API基础URL（默认: https://api.rcouyi.com/v1）
-        LLM_MODEL: 默认模型（默认: gpt-4o）
+    LLM_BASE_URL: API基础URL（默认: https://api.rcouyi.com/v1）
+    LLM_MODEL: 默认模型（默认: gpt-4o）
     """
     # 必填配置（通过__post_init__从环境变量读取）
     api_key: str = field(default="")
     base_url: str = field(default="")
-    
+
     # 默认配置
     model: str = "gpt-4o"
     max_tokens: int = 8192
@@ -64,7 +133,9 @@ class LLMConfig:
     max_retries: int = 3
     retry_base_delay: float = 2.0  # seconds; doubles on each retry
     timeout: float = 120.0  # seconds per request
-    
+    retry_policy: RetryPolicy = field(default_factory=RetryPolicy)
+    connection_pool: ConnectionPoolConfig = field(default_factory=ConnectionPoolConfig)
+
     def __post_init__(self):
         """验证和加载配置。"""
         # API密钥：优先使用传入值，否则从环境变量读取
@@ -144,22 +215,35 @@ class SessionUsage:
         return t
 
 
+@dataclass
+class ResourceMetrics:
+    """Track resource usage for leak detection."""
+    client_created_at: float = field(default_factory=time.time)
+    total_calls: int = 0
+    active_calls: int = 0
+    connections_opened: int = 0
+    connections_closed: int = 0
+
+    @property
+    def connections_in_flight(self) -> int:
+        return self.connections_opened - self.connections_closed
+
+    def record_call_start(self) -> None:
+        self.total_calls += 1
+        self.active_calls += 1
+
+    def record_call_end(self) -> None:
+        self.active_calls -= 1
+
+
 # ─── Errors ──────────────────────────────────────────────────────────────────
+# NOTE: Exception classes are imported from pipeline.exceptions
+# These aliases maintain backward compatibility for existing code
 
-class LLMError(Exception):
-    """Base class for LLM client errors."""
-
-
-class LLMParseError(LLMError):
-    """Raised when the LLM response cannot be parsed as expected JSON."""
-
-    def __init__(self, message: str, raw_response: str):
-        super().__init__(message)
-        self.raw_response = raw_response
-
-
-class LLMRetryExhausted(LLMError):
-    """Raised when all retry attempts are exhausted."""
+# Backward compatibility aliases
+LLMError = LLMError
+LLMParseError = LLMParseError
+LLMRetryExhausted = LLMRetryExhausted
 
 
 # ─── Client ──────────────────────────────────────────────────────────────────
@@ -182,35 +266,62 @@ class LLMClient:
         self.config = config or LLMConfig()
         self.session_usage = session_usage or SessionUsage()
         self._closed = False  # Track if already closed
-        # Create httpx client that bypasses proxy to avoid SSL issues
-        self._http_client = httpx.Client(proxy=None)
+        self._metrics = ResourceMetrics()
+        self._lock = threading.Lock()
+
+        # Create configured httpx clients with connection pool settings
+        pool_config = self.config.connection_pool
+
+        # Configure connection pool limits
+        limits = httpx.Limits(
+            max_connections=pool_config.max_connections,
+            max_keepalive_connections=pool_config.max_keepalive_connections,
+            keepalive_expiry=pool_config.keepalive_expiry,
+        )
+
+        # Configure timeouts
+        timeout = httpx.Timeout(
+            connect=pool_config.connect_timeout,
+            read=pool_config.read_timeout,
+            write=pool_config.write_timeout,
+            pool=pool_config.pool_timeout,
+        )
+
+        # Create sync httpx client with connection pool configuration
+        self._http_client = httpx.Client(
+            limits=limits,
+            timeout=timeout,
+            http2=pool_config.http2,
+            proxy=None,  # Keep proxy disabled to avoid SSL issues
+        )
+        self._metrics.connections_opened += 1
         self._client = OpenAI(
             base_url=self.config.base_url,
             api_key=self.config.api_key,
             http_client=self._http_client
         )
-        # Create async client for parallel calls
-        self._async_http_client = httpx.AsyncClient(proxy=None)
+
+        # Create async httpx client with same connection pool configuration
+        self._async_http_client = httpx.AsyncClient(
+            limits=limits,
+            timeout=timeout,
+            http2=pool_config.http2,
+            proxy=None,  # Keep proxy disabled to avoid SSL issues
+        )
+        self._metrics.connections_opened += 1
         self._async_client = AsyncOpenAI(
             base_url=self.config.base_url,
             api_key=self.config.api_key,
             http_client=self._async_http_client
         )
 
-    @suppress_exceptions
-    def close(self) -> None:
-        """Close HTTP clients to prevent Windows asyncio cleanup warnings."""
+    def _check_not_closed(self) -> None:
+        """Raise error if client is already closed."""
         if self._closed:
-            return
-        self._closed = True
+            raise RuntimeError("LLMClient has been closed")
 
-        # Close sync client
-        try:
-            self._http_client.close()
-        except Exception as e:
-            logger.debug("Failed to close sync HTTP client: %s", e)
-
-        # Close async client - must be done carefully on Windows
+    def _close_async_client(self, timeout: float) -> None:
+        """Close async HTTP client with timeout handling."""
         try:
             import asyncio
             # Try to get a running loop
@@ -232,12 +343,202 @@ class LLMClient:
                     # Event loop is closed, log and continue
                     logger.debug("Event loop already closed, skipping async client cleanup")
         except Exception as e:
-            logger.debug("Failed to close async HTTP client: %s", e)
+            logger.warning("Error closing async HTTP client: %s", e)
+
+    @suppress_exceptions
+    def close(self, timeout: float = 30.0) -> None:
+        """Close HTTP clients gracefully.
+
+        Args:
+            timeout: Maximum time to wait for async client cleanup (seconds).
+
+        This method is idempotent - calling it multiple times is safe.
+        """
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+
+        logger.debug("Closing LLMClient...")
+
+        # Close sync client
+        try:
+            self._http_client.close()
+            self._metrics.connections_closed += 1
+            logger.debug("Sync HTTP client closed")
+        except Exception as e:
+            logger.warning("Error closing sync HTTP client: %s", e)
+
+        # Close async client
+        self._close_async_client(timeout)
+
+        logger.debug(
+            "LLMClient closed. Total calls: %d, Active calls: %d",
+            self._metrics.total_calls,
+            self._metrics.active_calls
+        )
 
     @suppress_exceptions
     def __del__(self) -> None:
         """Cleanup on garbage collection - suppress all errors on Windows."""
         self.close()
+
+    # ── Context manager support ───────────────────────────────────────────────
+
+    def __enter__(self) -> "LLMClient":
+        """Context manager entry."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[Any]
+    ) -> bool:
+        """Context manager exit - ensures cleanup."""
+        self.close()
+        return False
+
+    async def __aenter__(self) -> "LLMClient":
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[Any]
+    ) -> bool:
+        """Async context manager exit."""
+        self.close()
+        return False
+
+    # ── Core helper methods (shared between sync/async) ─────────────────────
+
+    def _create_messages(self, system: str, user: str) -> Any:
+        """Create message list - pure logic, no IO."""
+        return [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user}
+        ]
+
+    def _should_retry(self, exc: Exception) -> tuple[bool, float]:
+        """
+        Determine if the exception should trigger a retry.
+        Returns (should_retry, new_delay_multiplier).
+
+        Maps OpenAI exceptions to appropriate retry behavior:
+        - RateLimitError: retry with exponential backoff
+        - APIStatusError (5xx): retry (server errors)
+        - APIStatusError (4xx): don't retry (client errors)
+        - APIConnectionError: retry (network issues)
+        """
+        import openai
+        if isinstance(exc, openai.RateLimitError):
+            return True, 2.0
+        elif isinstance(exc, openai.APIStatusError) and exc.status_code >= 500:
+            return True, 2.0
+        elif isinstance(exc, openai.APIStatusError):
+            return False, 0.0  # 4xx errors are not retried
+        elif isinstance(exc, openai.APIConnectionError):
+            return True, 2.0
+        return False, 0.0
+
+    def _wrap_exception(
+        self,
+        exc: Exception,
+        step_name: str,
+        model: str,
+        attempt: int,
+        max_retries: int,
+    ) -> Exception:
+        """Wrap OpenAI exceptions into structured LLMError types.
+
+        Args:
+            exc: The original exception from OpenAI
+            step_name: Name of the pipeline step
+            model: Model being used
+            attempt: Current attempt number
+            max_retries: Maximum retry attempts
+
+        Returns:
+            Structured LLMError subclass instance
+        """
+        import openai
+
+        if isinstance(exc, openai.RateLimitError):
+            # Extract retry_after if available from response headers
+            retry_after: Optional[float] = None
+            try:
+                # RateLimitError may have response.headers
+                if hasattr(exc, 'response') and exc.response is not None:
+                    headers = getattr(exc.response, 'headers', None)
+                    if headers:
+                        retry_after_header = headers.get('retry-after')
+                        if retry_after_header:
+                            retry_after = float(retry_after_header)
+            except (ValueError, TypeError, AttributeError):
+                pass
+            return LLMRateLimitError(
+                str(exc),
+                step_name=step_name,
+                model=model,
+                attempt=attempt,
+                max_retries=max_retries,
+                cause=exc,
+                retry_after=retry_after,
+            )
+        elif isinstance(exc, openai.APIStatusError):
+            if exc.status_code >= 500:
+                return LLMServerError(
+                    str(exc),
+                    step_name=step_name,
+                    model=model,
+                    attempt=attempt,
+                    max_retries=max_retries,
+                    cause=exc,
+                )
+            else:
+                return LLMClientError(
+                    str(exc),
+                    step_name=step_name,
+                    model=model,
+                    attempt=attempt,
+                    max_retries=max_retries,
+                    cause=exc,
+                )
+        elif isinstance(exc, openai.APIConnectionError):
+            return LLMConnectionError(
+                str(exc),
+                step_name=step_name,
+                model=model,
+                attempt=attempt,
+                max_retries=max_retries,
+                cause=exc,
+            )
+        else:
+            # Generic LLM error for unknown exception types
+            return LLMError(
+                str(exc),
+                step_name=step_name,
+                model=model,
+                attempt=attempt,
+                max_retries=max_retries,
+                cause=exc,
+            )
+
+    def _record_usage(self, step_name: str, usage_obj: Any) -> TokenUsage:
+        """Record token usage - unified handling of None cases."""
+        if usage_obj:
+            usage = TokenUsage(
+                input_tokens=usage_obj.prompt_tokens or 0,
+                output_tokens=usage_obj.completion_tokens or 0,
+            )
+        else:
+            usage = TokenUsage(input_tokens=0, output_tokens=0)
+            logger.warning("[%s] Response usage is None", step_name)
+        self.session_usage.record(step_name, usage)
+        return usage
 
     # ── Raw call ─────────────────────────────────────────────────────────────
 
@@ -258,32 +559,38 @@ class LLMClient:
             user: User prompt content.
             model: Optional model override. If None, uses config default.
         """
+        self._check_not_closed()
+        self._metrics.record_call_start()
+        try:
+            return self._call_impl(step_name, system, user, model)
+        finally:
+            self._metrics.record_call_end()
+
+    def _call_impl(
+        self,
+        step_name: str,
+        system: str,
+        user: str,
+        model: Optional[str] = None,
+    ) -> str:
+        """Internal implementation of call()."""
         effective_model = model or self.config.model
-        delay = self.config.retry_base_delay
+        # Use retry_policy if available, fall back to legacy config values
+        retry_policy = self.config.retry_policy
+        delay = retry_policy.base_delay
         last_exc: Optional[Exception] = None
 
-        for attempt in range(1, self.config.max_retries + 1):
+        errors: list[Exception] = []
+        for attempt in range(1, retry_policy.max_retries + 1):
             try:
                 logger.debug("[%s] attempt %d/%d", step_name, attempt, self.config.max_retries)
                 response = self._client.chat.completions.create(
                     model=effective_model,
                     max_tokens=self.config.max_tokens,
                     temperature=self.config.temperature,
-                    messages=[
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user}
-                    ],
+                    messages=self._create_messages(system, user),
                 )
-                # Handle None usage gracefully
-                if response.usage:
-                    usage = TokenUsage(
-                        input_tokens=response.usage.prompt_tokens or 0,
-                        output_tokens=response.usage.completion_tokens or 0,
-                    )
-                else:
-                    usage = TokenUsage(input_tokens=0, output_tokens=0)
-                    logger.warning("[%s] Response usage is None, token tracking disabled", step_name)
-                self.session_usage.record(step_name, usage)
+                usage = self._record_usage(step_name, response.usage)
                 logger.debug(
                     "[%s] tokens: in=%d out=%d",
                     step_name, usage.input_tokens, usage.output_tokens,
@@ -292,29 +599,29 @@ class LLMClient:
                 return content if content is not None else ""
 
             except Exception as exc:
-                import openai
-                if openai and isinstance(exc, openai.RateLimitError):
+                errors.append(exc)
+                should_retry, _ = self._should_retry(exc)
+                if should_retry:
                     last_exc = exc
-                    logger.warning("[%s] rate limit, retrying in %.1fs (attempt %d)", step_name, delay, attempt)
+                    # Use retry_policy for delay calculation
+                    delay = retry_policy.calculate_delay(attempt)
+                    logger.warning("[%s] %s, retrying in %.1fs (attempt %d/%d)",
+                        step_name, type(exc).__name__, delay, attempt, retry_policy.max_retries)
                     time.sleep(delay)
-                    delay *= 2
-                elif openai and isinstance(exc, openai.APIStatusError) and exc.status_code >= 500:
-                    last_exc = exc
-                    logger.warning("[%s] server error %d, retrying in %.1fs", step_name, exc.status_code, delay)
-                    time.sleep(delay)
-                    delay *= 2
-                elif openai and isinstance(exc, openai.APIStatusError):
-                    raise  # 4xx not retried
-                elif openai and isinstance(exc, openai.APIConnectionError):
-                    last_exc = exc
-                    logger.warning("[%s] connection error, retrying in %.1fs", step_name, delay)
-                    time.sleep(delay)
-                    delay *= 2
                 else:
-                    raise
+                    # Wrap non-retryable exceptions with structured error info
+                    wrapped = self._wrap_exception(
+                        exc, step_name, effective_model, attempt, retry_policy.max_retries
+                    )
+                    raise wrapped from exc
 
+        # All retries exhausted - raise with full error history
         raise LLMRetryExhausted(
-            f"[{step_name}] all {self.config.max_retries} attempts failed"
+            f"[{step_name}] all {retry_policy.max_retries} attempts failed",
+            step_name=step_name,
+            model=effective_model,
+            max_retries=retry_policy.max_retries,
+            errors=errors,
         ) from last_exc
 
     # ── JSON call ────────────────────────────────────────────────────────────
@@ -366,60 +673,68 @@ class LLMClient:
             user: User prompt content.
             model: Optional model override. If None, uses config default.
         """
-        effective_model = model or self.config.model
-        delay = self.config.retry_base_delay
-        last_exc: Optional[Exception] = None
+        self._check_not_closed()
+        self._metrics.record_call_start()
+        try:
+            return await self._async_call_impl(step_name, system, user, model)
+        finally:
+            self._metrics.record_call_end()
 
-        for attempt in range(1, self.config.max_retries + 1):
+    async def _async_call_impl(
+        self,
+        step_name: str,
+        system: str,
+        user: str,
+        model: Optional[str] = None,
+    ) -> str:
+        """Internal implementation of async_call()."""
+        effective_model = model or self.config.model
+        # Use retry_policy if available, fall back to legacy config values
+        retry_policy = self.config.retry_policy
+        delay = retry_policy.base_delay
+        last_exc: Optional[Exception] = None
+        errors: list[Exception] = []
+
+        for attempt in range(1, retry_policy.max_retries + 1):
             try:
-                logger.debug("[%s] async attempt %d/%d", step_name, attempt, self.config.max_retries)
+                logger.debug("[%s] async attempt %d/%d", step_name, attempt, retry_policy.max_retries)
                 response = await self._async_client.chat.completions.create(
                     model=effective_model,
                     max_tokens=self.config.max_tokens,
                     temperature=self.config.temperature,
-                    messages=[
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user}
-                    ],
+                    messages=self._create_messages(system, user),
                 )
-                usage = TokenUsage(
-                    input_tokens=response.usage.prompt_tokens if response.usage else 0,
-                    output_tokens=response.usage.completion_tokens if response.usage else 0,
-                )
-                self.session_usage.record(step_name, usage)
+                usage = self._record_usage(step_name, response.usage)
                 logger.debug(
                     "[%s] async tokens: in=%d out=%d",
                     step_name, usage.input_tokens, usage.output_tokens,
                 )
                 content = response.choices[0].message.content
-                if content is None:
-                    return ""
-                return content
+                return content if content is not None else ""
 
             except Exception as exc:
-                import openai
-                if openai and isinstance(exc, openai.RateLimitError):
+                errors.append(exc)
+                should_retry, _ = self._should_retry(exc)
+                if should_retry:
                     last_exc = exc
-                    logger.warning("[%s] async rate limit, retrying in %.1fs (attempt %d)", step_name, delay, attempt)
+                    # Use retry_policy for delay calculation
+                    delay = retry_policy.calculate_delay(attempt)
+                    logger.warning("[%s] async %s, retrying in %.1fs (attempt %d/%d)",
+                                  step_name, type(exc).__name__, delay, attempt, retry_policy.max_retries)
                     await asyncio.sleep(delay)
-                    delay *= 2
-                elif openai and isinstance(exc, openai.APIStatusError) and exc.status_code >= 500:
-                    last_exc = exc
-                    logger.warning("[%s] async server error %d, retrying in %.1fs", step_name, exc.status_code, delay)
-                    await asyncio.sleep(delay)
-                    delay *= 2
-                elif openai and isinstance(exc, openai.APIStatusError):
-                    raise  # 4xx not retried
-                elif openai and isinstance(exc, openai.APIConnectionError):
-                    last_exc = exc
-                    logger.warning("[%s] async connection error, retrying in %.1fs", step_name, delay)
-                    await asyncio.sleep(delay)
-                    delay *= 2
                 else:
-                    raise
+                    # Wrap non-retryable exceptions with structured error info
+                    wrapped = self._wrap_exception(
+                        exc, step_name, effective_model, attempt, retry_policy.max_retries
+                    )
+                    raise wrapped from exc
 
         raise LLMRetryExhausted(
-            f"[{step_name}] async all {self.config.max_retries} attempts failed"
+            f"[{step_name}] async all {retry_policy.max_retries} attempts failed",
+            step_name=step_name,
+            model=effective_model,
+            max_retries=retry_policy.max_retries,
+            errors=errors,
         ) from last_exc
 
     async def async_call_json(

@@ -122,6 +122,82 @@ skill-to-cnlp --skill pdf --output output/pdf --model gpt-4o
 
 ```
 skill-to-cnlp/
+├── main.py                  # Example entry point
+├── cli.py                   # Command-line interface
+├── cli_async.py            # Async CLI variant
+├── pyproject.toml          # Project configuration
+├── AGENTS.md               # Project knowledge base
+│
+├── pipeline/               # Core pipeline logic (refactored)
+│   ├── orchestrator.py     # Backward-compatible API entry
+│   ├── orchestrator_async.py  # Async orchestrator
+│   ├── llm_client.py       # LLM API wrapper with retry logic
+│   ├── spl_formatter.py    # SPL formatting utilities
+│   ├── orchestrator/       # NEW: Modular orchestrator components
+│   │   ├── __init__.py
+│   │   ├── base.py         # PipelineStep protocol
+│   │   ├── builder.py      # PipelineBuilder
+│   │   ├── config.py       # PipelineConfig
+│   │   ├── context.py      # ExecutionContext
+│   │   └── runners/        # Step runners
+│   │       ├── sequential.py
+│   │       └── parallel.py
+│   └── llm_steps/          # Step implementations
+│       ├── p2_file_role_resolve.py
+│       ├── p3_summarize_file.py
+│       ├── step1_structure_extraction.py
+│       ├── step1_5_api_generation.py
+│       ├── step3/          # Step 3: Workflow analysis
+│       │   ├── __init__.py
+│       │   ├── orchestrator.py
+│       │   ├── t.py        # Entity extraction
+│       │   └── w.py        # Workflow analysis
+│       └── step4_spl_emission/  # Step 4: Parallel SPL emission
+│           ├── __init__.py
+│           ├── assembly.py
+│           ├── orchestrator.py
+│           └── substep_calls.py
+│
+├── pre_processing/         # Code-based preprocessing
+│   ├── p1_reference_graph.py
+│   ├── p2_file_role_resolver.py
+│   └── p3_assembler.py
+│
+├── models/                 # Data models (refactored)
+│   ├── __init__.py         # Backward-compatible exports
+│   ├── data_models.py      # Legacy (deprecated)
+│   └── pipeline/           # NEW: Pipeline-specific models
+│       └── pipeline_result.py
+│
+├── prompts/                # LLM system prompts
+│   ├── step1_system.py
+│   ├── step3_system.py
+│   └── step4_*.py
+│
+├── skills/                 # Example skill packages (20 skills)
+│   ├── pdf/                # PDF processing
+│   ├── docx/               # Word document processing
+│   ├── pptx/               # PowerPoint manipulation
+│   ├── xlsx/               # Excel operations
+│   ├── skill-to-cnlp/      # The SPL emitter skill itself
+│   └── ...                 # 15 other skills
+│
+└── test/                   # Test suite (expanded)
+    ├── conftest.py         # Shared pytest fixtures
+    ├── e2e/                # NEW: End-to-end tests
+    │   ├── conftest.py
+    │   ├── test_core_skills.py
+    │   ├── test_extended_skills.py
+    │   └── test_resume_functionality.py
+    ├── performance/        # NEW: Performance tests
+    │   ├── conftest.py
+    │   ├── test_performance_core.py
+    │   └── baseline.json
+    ├── regression/         # NEW: Regression tests
+    │   └── test_regression.py
+    └── test_*.py           # Unit tests
+```
+skill-to-cnlp/
 ├── main.py                 # Example entry point
 ├── cli.py                  # Command-line interface
 ├── pyproject.toml          # Project configuration

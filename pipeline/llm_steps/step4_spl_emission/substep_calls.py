@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -11,7 +12,46 @@ from prompts import templates
 logger = logging.getLogger(__name__)
 
 
-# ── Async versions (new code should use these) ─────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# Helper functions (shared logic)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _prepare_s4e_inputs(inputs: dict, symbol_table_text: str, apis_spl: str) -> tuple:
+    """Prepare inputs for S4E (WORKER block generation)."""
+    tools_list = inputs.get("tools_list", [])
+    tools_json_str = json.dumps(tools_list, indent=2, ensure_ascii=False) if tools_list else "[]"
+    return templates.render_s4e_user(
+        workflow_steps_json=inputs["workflow_steps_json"],
+        workflow_prose=inputs["workflow_prose"],
+        alternative_flows_json=inputs["alternative_flows_json"],
+        exception_flows_json=inputs["exception_flows_json"],
+        symbol_table=symbol_table_text,
+        apis_spl=apis_spl,
+        tools_json=tools_json_str,
+    )
+
+
+def _parse_json_response(response: str) -> dict:
+    """Parse JSON response, handling markdown code blocks."""
+    try:
+        cleaned = response.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.split("\n")
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            cleaned = "\n".join(lines).strip()
+        return json.loads(cleaned)
+    except json.JSONDecodeError as e:
+        logger.warning("[Step 4E1] Failed to parse JSON response: %s", e)
+        logger.debug("[Step 4E1] Raw response:\n%s", response[:500])
+        return {"has_violations": False, "violations": []}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Async versions (new code should use these)
+# ═══════════════════════════════════════════════════════════════════════════════
 
 async def _call_4c_async(client: LLMClient, inputs: dict, model: str | None = None) -> str:
     """Generate DEFINE_VARIABLES + DEFINE_FILES block."""
@@ -56,19 +96,13 @@ async def _call_4b_async(client: LLMClient, inputs: dict, symbol_table_text: str
 
 async def _call_4e_async(client: LLMClient, inputs: dict, symbol_table_text: str, apis_spl: str, model: str | None = None) -> str:
     """Generate WORKER block (MAIN_FLOW + ALTERNATIVE_FLOW + EXCEPTION_FLOW)."""
-    # Convert tools_list to JSON string for S4E
-    tools_list = inputs.get("tools_list", [])
-    tools_json_str = json.dumps(tools_list, indent=2, ensure_ascii=False) if tools_list else "[]"
-    s4e_system, s4e_user = templates.render_s4e_user(
-        workflow_steps_json=inputs["workflow_steps_json"],
-        workflow_prose=inputs["workflow_prose"],
-        alternative_flows_json=inputs["alternative_flows_json"],
-        exception_flows_json=inputs["exception_flows_json"],
-        symbol_table=symbol_table_text,
-        apis_spl=apis_spl,
-        tools_json=tools_json_str,
+    s4e_system, s4e_user = _prepare_s4e_inputs(inputs, symbol_table_text, apis_spl)
+    return await client.async_call(
+        step_name="step4e_worker",
+        system=s4e_system,
+        user=s4e_user,
+        model=model,
     )
-    return await client.async_call(step_name="step4e_worker", system=s4e_system, user=s4e_user, model=model)
 
 
 async def _call_4e1_async(client: LLMClient, worker_spl: str, model: str | None = None) -> dict:
@@ -85,26 +119,7 @@ async def _call_4e1_async(client: LLMClient, worker_spl: str, model: str | None 
         user=s4e1_user,
         model=model,
     )
-
-    # Parse JSON response (handle markdown code blocks)
-    try:
-        # Strip markdown fences if present
-        cleaned = response.strip()
-        if cleaned.startswith("```"):
-            # Remove opening fence
-            lines = cleaned.split("\n")
-            if lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].startswith("```"):
-                lines = lines[:-1]
-            cleaned = "\n".join(lines).strip()
-
-        result = json.loads(cleaned)
-        return result
-    except json.JSONDecodeError as e:
-        logger.warning("[Step 4E1] Failed to parse JSON response: %s", e)
-        logger.debug("[Step 4E1] Raw response:\n%s", response[:500])
-        return {"has_violations": False, "violations": []}
+    return _parse_json_response(response)
 
 
 async def _call_4e2_async(client: LLMClient, worker_spl: str, violations: list, model: str | None = None) -> str:
@@ -139,18 +154,7 @@ async def _call_4f_async(client: LLMClient, inputs: dict, worker_spl: str, model
 
 
 async def _call_s0_async(client: LLMClient, skill_id: str, intent_text: str, notes_text: str, model: str | None = None) -> str:
-    """Generate DEFINE_AGENT header block.
-
-    Args:
-        client: LLM client for making calls
-        skill_id: The skill identifier
-        intent_text: The INTENT section text
-        notes_text: The NOTES section text
-        model: Optional model override
-
-    Returns:
-        The DEFINE_AGENT header line (e.g., "[DEFINE_AGENT: AgentName "description"]")
-    """
+    """Generate DEFINE_AGENT header block."""
     return await client.async_call(
         "step0_define_agent",
         templates.S0_SYSTEM,
@@ -159,7 +163,9 @@ async def _call_s0_async(client: LLMClient, skill_id: str, intent_text: str, not
     )
 
 
-# ── Sync versions (legacy, kept for backward compatibility) ──────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# Sync versions (thin wrappers - directly call client.call())
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def _call_4d(client: LLMClient, tool: dict, model: str | None = None) -> str:
     """Generate DEFINE_APIS block for a single tool.
@@ -171,7 +177,10 @@ def _call_4d(client: LLMClient, tool: dict, model: str | None = None) -> str:
 
 
 def _call_4c(client: LLMClient, inputs: dict, model: str | None = None) -> str:
-    """Generate DEFINE_VARIABLES + DEFINE_FILES block."""
+    """Generate DEFINE_VARIABLES + DEFINE_FILES block.
+
+    This sync version directly calls client.call() for use in ThreadPoolExecutor.
+    """
     if not inputs["has_entities"]:
         return ""
     return client.call(
@@ -183,7 +192,10 @@ def _call_4c(client: LLMClient, inputs: dict, model: str | None = None) -> str:
 
 
 def _call_4a(client: LLMClient, inputs: dict, symbol_table_text: str, model: str | None = None) -> str:
-    """Generate PERSONA / AUDIENCE / CONCEPTS block."""
+    """Generate PERSONA / AUDIENCE / CONCEPTS block.
+
+    This sync version directly calls client.call() for use in ThreadPoolExecutor.
+    """
     return client.call(
         "step4a_persona",
         templates.S4A_SYSTEM,
@@ -197,7 +209,10 @@ def _call_4a(client: LLMClient, inputs: dict, symbol_table_text: str, model: str
 
 
 def _call_4b(client: LLMClient, inputs: dict, symbol_table_text: str, model: str | None = None) -> str:
-    """Generate DEFINE_CONSTRAINTS block."""
+    """Generate DEFINE_CONSTRAINTS block.
+
+    This sync version directly calls client.call() for use in ThreadPoolExecutor.
+    """
     if not inputs["has_constraints"]:
         return ""
     return client.call(
@@ -212,7 +227,10 @@ def _call_4b(client: LLMClient, inputs: dict, symbol_table_text: str, model: str
 
 
 def _call_4e(client: LLMClient, inputs: dict, symbol_table_text: str, apis_spl: str, model: str | None = None) -> str:
-    """Generate WORKER block (MAIN_FLOW + ALTERNATIVE_FLOW + EXCEPTION_FLOW)."""
+    """Generate WORKER block (MAIN_FLOW + ALTERNATIVE_FLOW + EXCEPTION_FLOW).
+
+    This sync version directly calls client.call() for use in ThreadPoolExecutor.
+    """
     tools_list = inputs.get("tools_list", [])
     tools_json_str = json.dumps(tools_list, indent=2, ensure_ascii=False) if tools_list else "[]"
     s4e_system, s4e_user = templates.render_s4e_user(
@@ -227,8 +245,46 @@ def _call_4e(client: LLMClient, inputs: dict, symbol_table_text: str, apis_spl: 
     return client.call(step_name="step4e_worker", system=s4e_system, user=s4e_user, model=model)
 
 
+def _call_4e1(client: LLMClient, worker_spl: str, model: str | None = None) -> dict:
+    """Detect illegal nested BLOCK structures in WORKER SPL (sync version).
+
+    Returns a dict with:
+    - has_violations: bool
+    - violations: list of violation dicts
+    """
+    s4e1_user = templates.render_s4e1_user(worker_spl=worker_spl)
+    response = client.call(
+        step_name="step4e1_nesting_detection",
+        system=templates.S4E1_SYSTEM,
+        user=s4e1_user,
+        model=model,
+    )
+    return _parse_json_response(response)
+
+
+def _call_4e2(client: LLMClient, worker_spl: str, violations: list, model: str | None = None) -> str:
+    """Fix illegal nested BLOCK structures by flattening (sync version).
+
+    Returns the corrected WORKER SPL text.
+    """
+    violations_json = json.dumps(violations, indent=2, ensure_ascii=False)
+    s4e2_user = templates.render_s4e2_user(
+        worker_spl=worker_spl,
+        violations_json=violations_json,
+    )
+    return client.call(
+        step_name="step4e2_nesting_fix",
+        system=templates.S4E2_SYSTEM,
+        user=s4e2_user,
+        model=model,
+    )
+
+
 def _call_4f(client: LLMClient, inputs: dict, worker_spl: str, model: str | None = None) -> str:
-    """Generate [EXAMPLES] block."""
+    """Generate [EXAMPLES] block.
+
+    This sync version directly calls client.call() for use in ThreadPoolExecutor.
+    """
     return client.call(
         "step4f_examples",
         templates.S4F_SYSTEM,
@@ -243,15 +299,7 @@ def _call_4f(client: LLMClient, inputs: dict, worker_spl: str, model: str | None
 def _call_s0(client: LLMClient, skill_id: str, intent_text: str, notes_text: str, model: str | None = None) -> str:
     """Generate DEFINE_AGENT header block.
 
-    Args:
-        client: LLM client for making calls
-        skill_id: The skill identifier
-        intent_text: The INTENT section text
-        notes_text: The NOTES section text
-        model: Optional model override
-
-    Returns:
-        The DEFINE_AGENT header line (e.g., "[DEFINE_AGENT: AgentName "description"]")
+    This sync version directly calls client.call() for use in ThreadPoolExecutor.
     """
     return client.call(
         "step0_define_agent",

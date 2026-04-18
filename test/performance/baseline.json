@@ -1,0 +1,32 @@
+{
+  "pdf": {
+    "skill_name": "pdf",
+    "elapsed_time": 45.0,
+    "peak_memory_mb": 150.0,
+    "tokens_used": 8000,
+    "timestamp": "2026-04-19T00:00:00",
+    "version": "pre-refactor"
+  },
+  "docx": {
+    "skill_name": "docx",
+    "elapsed_time": 52.0,
+    "peak_memory_mb": 180.0,
+    "tokens_used": 9500,
+    "timestamp": "2026-04-19T00:00:00",
+    "version": "pre-refactor"
+  },
+  "_metadata": {
+    "description": "Performance baseline for skill-to-cnl-p pipeline",
+    "created_at": "2026-04-19T00:00:00",
+    "version": "1.0",
+    "note": "Run actual tests with --performance-baseline to record real values",
+    "thresholds": {
+      "regression_percent": 5.0,
+      "max_memory_mb": 500
+    },
+    "test_skills": [
+      "pdf",
+      "docx"
+    ]
+  }
+}

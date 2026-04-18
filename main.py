@@ -25,7 +25,7 @@ if sys.platform == 'win32':
         pass
 
 from pipeline.llm_client import LLMConfig, StepLLMConfig
-from pipeline.orchestrator import run_pipeline, PipelineConfig
+from pipeline import run_pipeline, PipelineConfig
 import logging
 
 # 配置 logging - 这一行是必须的！
@@ -66,11 +66,9 @@ if __name__ == '__main__':
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
     # 拼接带时间戳的输出目录
     output_dir = f'output/{skill}_{current_time}'
-    output_dir = f'output/{skill}-v2'
+    output_dir = f'output/{skill}-v3'
 
     llm_config = LLMConfig(
-        # base_url='https://openrouter.ai/api/v1',
-        # api_key='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',
         model='gpt-4o',
         max_tokens=16000,
     )
