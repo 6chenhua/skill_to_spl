@@ -5,14 +5,14 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
-from models.data_models import (
-    AlternativeFlowSpec,
+from models import (
+    AlternativeFlow,
     EntitySpec,
-    ExceptionFlowSpec,
+    ExceptionFlow,
     SectionBundle,
     SPLSpec,
     StructuredSpec,
-    WorkflowStepSpec,
+    WorkflowStep,
     UnifiedAPISpec,
 )
 from pipeline.llm_client import LLMClient
@@ -168,9 +168,9 @@ def run_step4_spl_emission(
 def run_step4_spl_emission_parallel(
     bundle: SectionBundle,
     entities: list[EntitySpec],
-    workflow_steps: list[WorkflowStepSpec],
-    alternative_flows: list[AlternativeFlowSpec],
-    exception_flows: list[ExceptionFlowSpec],
+    workflow_steps: list[WorkflowStep],
+    alternative_flows: list[AlternativeFlow],
+    exception_flows: list[ExceptionFlow],
     skill_id: str,
     client: LLMClient,
     model: str | None = None,

@@ -507,8 +507,29 @@ def _generate_single_unified_api(
         return None
 
 
-def _generate_function_url(primary_library: str, function_name: str) -> str:
-    """Generate URL for a function in the format library.function."""
+def _generate_function_url(
+    primary_library: str, 
+    function_name: str,
+    source_file: Optional[str] = None
+) -> str:
+    """Generate URL for a function in the format library.function.
+    
+    Args:
+        primary_library: The primary library name (e.g., "pypdf" or "scripts")
+        function_name: The function name
+        source_file: Optional source file path (used for scripts to extract filename)
+        
+    Returns:
+        URL string in format: library.function or script_name.function
+    """
+    if primary_library == "scripts" and source_file:
+        # For scripts, extract the script filename from source_file
+        # source_file is like "scripts/check_bounding_boxes.py"
+        import os
+        script_name = os.path.splitext(os.path.basename(source_file))[0]
+        return f"{script_name}.{function_name}"
+    
+    # For libraries, use the library name directly
     return f"{primary_library}.{function_name}"
 
 
