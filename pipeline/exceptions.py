@@ -6,10 +6,8 @@ across the entire codebase.
 from __future__ import annotations
 
 import logging
-import time
-from dataclasses import dataclass
 from functools import wraps
-from typing import Any, Callable, Optional, TypeVar, cast
+from typing import Callable, Any, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -32,141 +30,21 @@ class ConfigurationError(PipelineError):
 
 
 class LLMError(PipelineError):
-    """Base class for LLM client errors with structured context.
-
-    Provides rich error context including step name, model, attempt info,
-    and timestamp for debugging and retry strategies.
-    """
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        step_name: Optional[str] = None,
-        model: Optional[str] = None,
-        attempt: Optional[int] = None,
-        max_retries: Optional[int] = None,
-        cause: Optional[Exception] = None,
-    ):
-        super().__init__(message)
-        self.step_name = step_name
-        self.model = model
-        self.attempt = attempt
-        self.max_retries = max_retries
-        self.cause = cause
-        self.timestamp = time.time()
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert error to dictionary for logging/serialization."""
-        return {
-            "type": self.__class__.__name__,
-            "message": str(self),
-            "step_name": self.step_name,
-            "model": self.model,
-            "attempt": self.attempt,
-            "max_retries": self.max_retries,
-            "timestamp": self.timestamp,
-            "cause": str(self.cause) if self.cause else None,
-        }
+    """LLM API call failures."""
+    pass
 
 
 class LLMParseError(LLMError):
     """Raised when the LLM response cannot be parsed."""
-
-    def __init__(self, message: str, raw_response: str, **kwargs: Any):
-        super().__init__(message, **kwargs)
+    
+    def __init__(self, message: str, raw_response: str):
+        super().__init__(message)
         self.raw_response = raw_response
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert error to dictionary including raw response."""
-        result = super().to_dict()
-        result["raw_response"] = self.raw_response
-        return result
-
-
-class LLMRateLimitError(LLMError):
-    """Rate limit exceeded with retry-after information."""
-
-    def __init__(
-        self,
-        *args: Any,
-        retry_after: Optional[float] = None,
-        **kwargs: Any,
-    ):
-        super().__init__(*args, **kwargs)
-        self.retry_after = retry_after
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert error to dictionary including retry_after."""
-        result = super().to_dict()
-        result["retry_after"] = self.retry_after
-        return result
-
-
-class LLMServerError(LLMError):
-    """5xx server errors from LLM API."""
-    pass
-
-
-class LLMClientError(LLMError):
-    """4xx client errors (not retried)."""
-    pass
-
-
-class LLMConnectionError(LLMError):
-    """Network/connection errors when calling LLM API."""
-    pass
 
 
 class LLMRetryExhausted(LLMError):
-    """All retry attempts exhausted with full error history."""
-
-    def __init__(
-        self,
-        *args: Any,
-        errors: Optional[list[Exception]] = None,
-        **kwargs: Any,
-    ):
-        super().__init__(*args, **kwargs)
-        self.errors = errors or []
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert error to dictionary including error history."""
-        result = super().to_dict()
-        result["error_count"] = len(self.errors)
-        serialized_errors: list[Any] = []
-        for e in self.errors:
-            if isinstance(e, LLMError):
-                serialized_errors.append(e.to_dict())
-            else:
-                serialized_errors.append(str(e))
-        result["errors"] = serialized_errors
-        return result
-
-
-@dataclass
-class RetryPolicy:
-    """Configurable retry policy for LLM calls.
-
-    Provides exponential backoff with configurable parameters.
-    """
-
-    max_retries: int = 3
-    base_delay: float = 2.0
-    max_delay: float = 60.0
-    exponential_base: float = 2.0
-
-    def calculate_delay(self, attempt: int) -> float:
-        """Calculate delay for the given attempt (1-indexed).
-
-        Args:
-            attempt: The attempt number (1-indexed)
-
-        Returns:
-            Delay in seconds, capped at max_delay
-        """
-        delay = self.base_delay * (self.exponential_base ** (attempt - 1))
-        return min(delay, self.max_delay)
+    """Raised when all retry attempts are exhausted."""
+    pass
 
 
 class PreprocessingError(PipelineError):
@@ -217,7 +95,7 @@ def log_exception(
                 if reraise:
                     raise
                 return default_return
-        return cast(F, wrapper)
+        return wrapper
     return decorator
 
 
@@ -256,7 +134,7 @@ def require_non_empty(
             if not result:
                 raise ValueError(message)
             return result
-        return cast(F, wrapper)
+        return wrapper
     return decorator
 
 

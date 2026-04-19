@@ -204,6 +204,13 @@ These are package files not needed for normalization but potentially used at run
 Each entry has: path (relative), kind (data|document|image|audio), size_bytes.
 
 {{omit_files_json}}
+
+## C. Declared custom types from [DEFINE_TYPES:] block
+When a variable or file has a type that matches one of these custom types, you MUST use
+the custom type name instead of the generic type. This ensures consistency between
+the TYPES, VARIABLES, and FILES sections.
+
+{{types_text}}
 """
 
 # ── 4d: APIS + GUARDRAIL ──────────────────────────────────────────────────────
@@ -432,10 +439,11 @@ def render_s4b_user(constraints_text: str, symbol_table: str = "") -> str:
     )
 
 
-def render_s4c_user(entities_text: str, omit_files_text: str) -> str:
+def render_s4c_user(entities_text: str, omit_files_text: str, types_text: str = "") -> str:
     return (S4C_USER
-        .replace("{{entities_json}}", entities_text)
-        .replace("{{omit_files_json}}", omit_files_text))
+ .replace("{{entities_json}}", entities_text)
+ .replace("{{omit_files_json}}", omit_files_text)
+ .replace("{{types_text}}", types_text or "(No custom types declared)"))
 
 
 def render_s4d_user(tools_json: str) -> str:

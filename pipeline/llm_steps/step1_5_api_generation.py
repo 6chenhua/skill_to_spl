@@ -20,10 +20,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-from models import APISpec, APISymbolTable, ToolSpec, UnifiedAPISpec, FunctionSpec
+from models.data_models import APISpec, APISymbolTable, ToolSpec, UnifiedAPISpec, FunctionSpec
 from pipeline.llm_client import LLMClient
 from prompts import templates
 
@@ -272,8 +273,12 @@ def build_api_symbol_table(apis: dict[str, APISpec]) -> APISymbolTable:
 
 
 def merge_api_spl_blocks(api_table: APISymbolTable) -> str:
-    """
-    Merge all API SPL blocks into a single DEFINE_APIS block.
+    """Merge all API SPL blocks into a single DEFINE_APIS block.
+
+    Applies post-processing to fix common LLM format errors:
+    - Strips any "DEFINE_API" prefix before API declarations
+    - Strips any [DEFINE_APIS:]/[END_APIS] wrappers from individual blocks
+    - Validates/corrects AUTHENTICATION values to only: none, apikey, oauth
 
     Args:
         api_table: APISymbolTable with all generated APIs
@@ -286,10 +291,99 @@ def merge_api_spl_blocks(api_table: APISymbolTable) -> str:
 
     parts = ["[DEFINE_APIS:]"]
     for name, spec in api_table.apis.items():
-        parts.append(spec.spl_text)
+        cleaned = _postprocess_api_spl(spec.spl_text, expected_name=name)
+        if cleaned:
+            parts.append(cleaned)
     parts.append("[END_APIS]")
 
     return "\n\n".join(parts)
+
+
+# Valid SPL authentication values
+_VALID_AUTH_VALUES = {"none", "apikey", "oauth"}
+
+# Regex: match API declaration header — e.g., "PdfReading<none>" or "DEFINE_API PdfReading<none>"
+_API_HEADER_RE = re.compile(
+    r'^\s*'
+    r'(?:DEFINE_API\s+)?'           # Optional "DEFINE_API " prefix (to strip)
+    r'([A-Za-z][A-Za-z0-9_]*)'      # API name (group 1)
+    r'<([^>]*)>'                     # Auth value inside <> (group 2)
+)
+
+# Regex: strip [DEFINE_APIS:] and [END_APIS] wrappers from individual blocks
+_API_WRAPPER_RE = re.compile(
+    r'^\s*\[DEFINE_APIS:\s*\]\s*\n?|'
+    r'\n?\s*\[END_APIS\s*\]\s*$',
+    re.MULTILINE
+)
+
+
+def _postprocess_api_spl(spl_text: str, expected_name: str) -> str:
+    """Post-process a single API SPL block to fix common LLM errors.
+
+    Fixes:
+    1. Strips "DEFINE_API" prefix before API name
+    2. Strips [DEFINE_APIS:]/[END_APIS] wrapper tags
+    3. Validates AUTHENTICATION value — replaces invalid values with "none"
+    4. Replaces literal "ApiName" with expected_name (PascalCase)
+
+    Args:
+        spl_text: Raw LLM-generated API SPL text
+        expected_name: Expected PascalCase API name
+
+    Returns:
+        Cleaned API declaration text
+    """
+    if not spl_text or not spl_text.strip():
+        return ""
+
+    text = spl_text.strip()
+
+    # Strip markdown code fences if present
+    if text.startswith("```"):
+        lines = text.split("\n")
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+
+    # Strip [DEFINE_APIS:]/[END_APIS] wrappers
+    text = _API_WRAPPER_RE.sub("", text).strip()
+
+    # Fix "DEFINE_API" prefix — strip it from any line
+    text = re.sub(r'^(\s*)DEFINE_API\s+', r'\1', text, flags=re.MULTILINE)
+
+    # Fix API name and auth value in the first API declaration line
+    # Match lines like: "PdfReading<none>" or "DEFINE_API PdfReading<none>"
+    # or "ApiName<AdvancedPdfManipulation>"
+    def _fix_header(match: re.Match) -> str:
+        api_name = match.group(1)
+        auth_value = match.group(2).strip()
+
+        # Replace literal "ApiName" with expected name
+        if api_name == "ApiName":
+            api_name = expected_name
+
+        # Ensure PascalCase
+        if api_name and api_name[0].islower():
+            api_name = api_name[0].upper() + api_name[1:]
+
+        # Validate auth value
+        if auth_value.lower() not in _VALID_AUTH_VALUES:
+            logger.warning(
+                "[Step 1.5] Invalid auth value <%s> for API %s, replacing with <none>",
+                auth_value, api_name
+            )
+            auth_value = "none"
+        else:
+            auth_value = auth_value.lower()
+
+        return f"{api_name}<{auth_value}>"
+
+    text = _API_HEADER_RE.sub(_fix_header, text, count=1)
+
+    return text
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -420,21 +514,54 @@ def _generate_function_url(primary_library: str, function_name: str) -> str:
 
 _UNIFIED_API_SYSTEM_PROMPT = """You are an expert SPL (Skill Processing Language) generator.
 
-Your task is to generate a DEFINE_API block for a unified API that contains multiple functions from one or more libraries.
+Your task is to generate a single API_DECLARATION for a unified API that contains multiple functions from one or more libraries.
 
-Key requirements:
-1. The API name should be in PascalCase
+## SPL Grammar for API_DECLARATION
+
+API_DECLARATION :=
+    API_NAME "<" AUTHENTICATION ">" OPENAPI_SCHEMA API_IN_SPL
+
+AUTHENTICATION := "none" | "apikey" | "oauth"
+    - ONLY these 3 values are allowed inside < >
+    - NEVER put an API name, library name, or any other text inside < >
+    - SCRIPT and CODE_SNIPPET tools always use <none>
+    - NETWORK_API tools use <apikey> or <oauth> as specified
+
+API_NAME := PascalCase name derived from the api_name field in the input JSON
+    - NEVER output literal "ApiName" — always use the actual API name from the input
+    - Convert to PascalCase if not already (e.g., "pdf_reading" → "PdfReading")
+
+OPENAPI_SCHEMA := "{ }" for SCRIPT/CODE_SNIPPET, or structured text for NETWORK_API
+
+API_IN_SPL := "{" "functions:" "[" {FUNCTION} "]" "}"
+
+FUNCTION := "{"
+    "name:" STATIC_DESCRIPTION ","
+    "url:" <url_string> ","
+    ["description:" STATIC_DESCRIPTION ","]
+    "parameters:" "{" "parameters:" "[" {PARAMETER} "]" "," "controlled-input:" BOOL "}" ","
+    "return:" "{" "type:" PARAMETER_TYPE "," "controlled-output:" BOOL "}"
+"}"
+
+## Key requirements
+1. Use the api_name from the input JSON as API_NAME (convert to PascalCase)
 2. Each function should have a descriptive name and URL in format: library.Class.method
-3. Include all functions from the unified API spec
-4. Use controlled-input and controlled-output appropriately
-5. Follow the exact SPL grammar format
+3. Include ALL functions from the unified API spec
+4. Use controlled-input and controlled-output: false unless explicitly stated
+5. AUTHENTICATION must be exactly one of: none, apikey, oauth
 
-Output ONLY the API declaration block, no markdown, no code fences."""
+## CRITICAL FORMAT RULES
+- Do NOT output "DEFINE_API" prefix — the declaration starts directly with API_NAME<AUTH>
+- Do NOT include [DEFINE_APIS:] or [END_APIS] wrapper tags
+- Do NOT use literal "ApiName" — always use the actual API name from input
+- The text inside < > must ONLY be none, apikey, or oauth
+
+Output ONLY the API declaration, no markdown, no code fences."""
 
 
 def _render_unified_api_user(api_json: str) -> str:
     """Render user prompt for unified API generation."""
-    return f"""Generate a unified API declaration for this specification:
+    return f"""Generate a single API_DECLARATION for this specification:
 
 ## Unified API Specification (JSON)
 
@@ -442,32 +569,40 @@ def _render_unified_api_user(api_json: str) -> str:
 
 ## Output Format
 
-Generate a single API declaration with multiple functions:
+Generate a single API declaration with multiple functions.
+Use the api_name field from the JSON as the PascalCase API name.
 
-ApiName<none>
+Example (for a PDF reading API):
+
+PdfReading<none>
 {{ }}
 {{
-  functions: [
+functions: [
     {{
-      name: "FunctionName",
-      url: "library.Class.method",
-      description: "What this function does",
-      parameters: {{
-        parameters: [
-          {{required: true, name: "param1", type: text}}
-        ],
-        controlled-input: false
-      }},
-      return: {{
-        type: ReturnType,
-        controlled-output: false
-      }}
+        name: "OpenPdfFile",
+        url: "pypdf.PdfReader",
+        description: "Open a PDF file for reading",
+        parameters: {{
+            parameters: [
+                {{required: true, name: "file_path", type: text}}
+            ],
+            controlled-input: false
+        }},
+        return: {{
+            type: "PdfReader object",
+            controlled-output: false
+        }}
     }},
     ... (more functions)
-  ]
+    ]
 }}
 
-Generate ONLY the API declaration, no wrapper."""
+CRITICAL RULES:
+- Start with the ACTUAL API name from the input (PascalCase), NOT "ApiName"
+- Authentication inside < > must be exactly: none, apikey, or oauth
+- Do NOT add "DEFINE_API" prefix
+- Do NOT add [DEFINE_APIS:] or [END_APIS] wrapper tags
+- Output ONLY the API declaration, nothing else."""
 
 
 async def _generate_single_unified_api_async(

@@ -17,7 +17,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from models import ScriptSpec
+from models.data_models import ScriptSpec
 
 
 # ─── Type annotation helpers ────────────────────────────────────────────────────

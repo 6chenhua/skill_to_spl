@@ -25,9 +25,35 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from pipeline.llm_client import LLMClient
-from models.pipeline_steps.api import FunctionSpec, UnifiedAPISpec
 
 logger = logging.getLogger(__name__)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Data Models (will be moved to models/data_models.py)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class FunctionSpec:
+    """单个函数的规格"""
+    name: str
+    signature: str
+    description: str
+    input_schema: dict[str, str]
+    output_schema: str
+
+
+@dataclass
+class UnifiedAPISpec:
+    """统一API规格（包含多个functions，支持多library）"""
+    api_id: str
+    api_name: str
+    primary_library: str
+    all_libraries: list[str]
+    language: str
+    functions: list[FunctionSpec]
+    combined_source: str
+    source_file: str
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

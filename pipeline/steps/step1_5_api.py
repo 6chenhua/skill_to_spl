@@ -65,14 +65,23 @@ class Step1_5APIGenStep(PipelineStep[dict, dict]):
             unified_apis_data = p3_data["unified_apis"]
             unified_apis = []
             for u in unified_apis_data:
-                # Convert nested functions from dict to FunctionSpec
-                functions_data = u.get("functions", [])
-                functions = [
-                    FunctionSpec(**f) if isinstance(f, dict) else f
-                    for f in functions_data
-                ]
-                # Create UnifiedAPISpec with converted functions
-                unified_apis.append(UnifiedAPISpec(**{**u, "functions": functions}))
+                # Handle both dict (from checkpoint) and UnifiedAPISpec object (from memory)
+                if isinstance(u, dict):
+                    # Convert nested functions from dict to FunctionSpec
+                    functions_data = u.get("functions", [])
+                    functions = [
+                        FunctionSpec(**f) if isinstance(f, dict) else f
+                        for f in functions_data
+                    ]
+                    # Create UnifiedAPISpec with converted functions
+                    unified_apis.append(UnifiedAPISpec(**{**u, "functions": functions}))
+                elif hasattr(u, '__dataclass_fields__') and 'api_id' in u.__dataclass_fields__:
+                    # Any UnifiedAPISpec-like dataclass (from models or pre_processing)
+                    # Convert to models.UnifiedAPISpec
+                    unified_apis.append(UnifiedAPISpec(**u.__dict__))
+                else:
+                    # Unexpected type, log and skip or convert
+                    context.logger.warning(f"Unexpected unified_api type: {type(u)}")
 
         # Try to get network APIs from Step 1
         step1_data = inputs.get("step1_structure", {})

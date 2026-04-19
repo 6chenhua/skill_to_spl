@@ -22,7 +22,7 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
-from models import FileReferenceGraph, SkillPackage, ToolSpec, UnifiedAPISpec
+from models.data_models import FileReferenceGraph, SkillPackage, ToolSpec, UnifiedAPISpec
 from pre_processing.unified_api_extractor import extract_unified_apis_with_retry
 
 logger = logging.getLogger(__name__)

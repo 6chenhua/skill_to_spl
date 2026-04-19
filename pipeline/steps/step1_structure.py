@@ -76,9 +76,16 @@ class Step1StructureStep(PipelineStep[dict, dict]):
         if "unified_apis" in package_data:
             from models import UnifiedAPISpec
 
-            package.unified_apis = [
-                UnifiedAPISpec(**api_data) for api_data in package_data["unified_apis"]
-            ]
+            unified_apis = []
+            for api_data in package_data["unified_apis"]:
+                if isinstance(api_data, dict):
+                    unified_apis.append(UnifiedAPISpec(**api_data))
+                elif isinstance(api_data, UnifiedAPISpec):
+                    unified_apis.append(api_data)
+                else:
+                    # Handle other cases (should not happen)
+                    unified_apis.append(api_data)
+            package.unified_apis = unified_apis
 
         # Get model override if configured
         model = context.config.get_step_model("step1_structure_extraction")
@@ -90,17 +97,18 @@ class Step1StructureStep(PipelineStep[dict, dict]):
             model=model,
         )
 
-        context.logger.info(
-            "[Step 1] Extracted %d items, %d network APIs",
-            sum(len(getattr(bundle, s.lower())) for s in [
-                "INTENT", "WORKFLOW", "CONSTRAINTS", "TOOLS",
-                "ARTIFACTS", "EVIDENCE", "EXAMPLES", "NOTES"
-            ]),
-            len(network_apis),
-        )
+    context.logger.info(
+        "[Step 1] Extracted %d items, %d network APIs",
+        sum(len(getattr(bundle, s.lower())) for s in [
+            "INTENT", "WORKFLOW", "CONSTRAINTS", "TOOLS",
+            "ARTIFACTS", "EVIDENCE", "EXAMPLES", "NOTES"
+        ]),
+        len(network_apis),
+    )
 
-        # Convert to dictionary for serialization
-        return {
-            "section_bundle": asdict(bundle),
-            "network_apis": [asdict(api) for api in network_apis],
-        }
+    # Convert to dictionary for serialization
+    return {
+        "skill_id": package.skill_id,
+        "section_bundle": asdict(bundle),
+        "network_apis": [asdict(api) for api in network_apis],
+    }

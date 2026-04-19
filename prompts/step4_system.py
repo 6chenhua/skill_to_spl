@@ -288,13 +288,22 @@ Field mapping:
 
 Convert type_name or schema_notes to SPL DATA_TYPE:
 
-  PDFDocument, ExcelDocument, DocxDocument, TextDocument, JSONFile, text-like → text
-  ImageFiles, PNG, JPG, JPEG, GIF, WEBP, image-like → image
-  AudioFiles, MP3, WAV, FLAC, audio-like → audio
-  Integer, Float, Number, numeric-like → number
-  Boolean, true/false-like → boolean
-  
-  Default fallback → text
+Priority 1 - Use declared custom types from [DEFINE_TYPES:] block:
+- If entity type matches a custom type alias (e.g., "List[image]" → ImageList), USE the custom type name
+- Example: type registry has "ImageList = List[image]", entity has type "List[image]" → use "ImageList"
+- Example: type registry has "TextList = List[text]", entity has type "List[text]" → use "TextList"
+- This ensures consistency between TYPES, VARIABLES, and FILES sections
+
+Priority 2 - Standard type mapping:
+PDFDocument, ExcelDocument, DocxDocument, TextDocument, JSONFile, text-like → text
+ImageFiles, PNG, JPG, JPEG, GIF, WEBP, image-like → image
+AudioFiles, MP3, WAV, FLAC, audio-like → audio
+Integer, Float, Number, numeric-like → number
+Boolean, true/false-like → boolean
+
+Default fallback → text
+
+CRITICAL: When a custom type is declared in [DEFINE_TYPES:], you MUST use that custom type name in VARIABLES and FILES instead of the underlying generic type.
 
 ## Step 5: Apply FILE_PATH rules (FILES only)
 
