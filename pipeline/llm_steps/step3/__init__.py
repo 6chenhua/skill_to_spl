@@ -18,7 +18,6 @@ Usage:
 
 from pipeline.llm_steps.step3.w import (
     run_step3w_workflow_analysis,
-    run_step3w_workflow_analysis_sync,
 )
 from pipeline.llm_steps.step3.io import (
     run_step3io_global_analysis,
@@ -36,7 +35,6 @@ from pipeline.llm_steps.step3.orchestrator import (
 __all__ = [
     # Step 3-W
     "run_step3w_workflow_analysis",
-    "run_step3w_workflow_analysis_sync",
     # Step 3-IO
     "run_step3io_global_analysis",
     "run_step3io_global_analysis_sync",

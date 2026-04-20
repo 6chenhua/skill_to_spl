@@ -362,3 +362,82 @@ def is_spl_indentation_valid(spl_text: str) -> bool:
     """检查SPL缩进是否有效"""
     errors = validate_spl_indentation(spl_text)
     return len(errors) == 0
+
+
+def format_worker_block_indentation(worker_spl: str, indent_size: int = 4) -> str:
+    """格式化单个WORKER block的缩进。
+    
+    这个函数假设输入是完整的WORKER block（包含[DEFINE_WORKER:...]和[END_WORKER]），
+    并相对于WORKER的层级（level 1）来格式化内部内容。
+    
+    Args:
+        worker_spl: WORKER SPL文本
+        indent_size: 每个层级的缩进空格数（默认4）
+        
+    Returns:
+        格式化后的WORKER SPL文本
+    """
+    if not worker_spl or not worker_spl.strip():
+        return worker_spl
+    
+    lines = worker_spl.split('\n')
+    result = []
+    stack = []  # 相对于WORKER内部的层级栈
+    i = 0
+    
+    # WORKER基础偏移 = 1 (DEFINE_WORKER在层级1)
+    base_level = 1
+    
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        
+        # 空行处理
+        if not stripped:
+            result.append(line)
+            i += 1
+            continue
+        
+        # 注释行处理
+        if stripped.startswith('#'):
+            current_level = len(stack)
+            result.append(' ' * ((base_level + current_level) * indent_size) + stripped)
+            i += 1
+            continue
+        
+        # 分类这一行
+        line_type, level = _classify_line(stripped)
+        
+        # 调整层级为相对于WORKER内部的层级
+        # level是全局层级，我们需要相对于base_level
+        relative_level = level - base_level
+        
+        if line_type == 'start':
+            # Block开始标记 - 缩进到其定义的全局层级
+            result.append(' ' * (level * indent_size) + stripped)
+            # 内容层级 = 标记层级 + 1
+            stack.append(level + 1)
+            i += 1
+            
+        elif line_type == 'end':
+            # Block结束标记 - 缩进到对应的开始标记同级
+            if stack:
+                content_level = stack.pop()
+                marker_level = content_level - 1
+                result.append(' ' * (marker_level * indent_size) + stripped)
+            else:
+                result.append(stripped)
+            i += 1
+            
+        elif line_type == 'control':
+            # 控制流标记 - 使用其全局层级
+            result.append(' ' * (level * indent_size) + stripped)
+            i += 1
+            
+        else:
+            # 普通内容行 - 缩进到当前栈深度
+            current_level = len(stack)
+            result.append(' ' * (current_level * indent_size) + stripped)
+            i += 1
+    
+    return '\n'.join(result)

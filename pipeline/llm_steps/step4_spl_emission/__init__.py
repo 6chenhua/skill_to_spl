@@ -12,12 +12,6 @@ the final normalized SPL specification through parallel sub-steps:
 
 from __future__ import annotations
 
-# Orchestrator entry points
-from pipeline.llm_steps.step4_spl_emission.orchestrator import (
-    run_step4_spl_emission,
-    run_step4_spl_emission_parallel,
-)
-
 # Async sub-step calls
 from pipeline.llm_steps.step4_spl_emission.substep_calls import (
     _call_4a_async,
@@ -67,6 +61,4 @@ from pipeline.llm_steps.step4_spl_emission.inputs import (
 from pipeline.llm_steps.step4_spl_emission.utils import _build_review_summary
 
 __all__ = [
-    "run_step4_spl_emission",
-    "run_step4_spl_emission_parallel",
 ]

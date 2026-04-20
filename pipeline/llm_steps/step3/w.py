@@ -185,22 +185,3 @@ def _parse_flows(flows_data: list[dict], flow_type: str) -> list:
     
     return flows
 
-
-def run_step3w_workflow_analysis_sync(
-    workflow_section: str,
-    tools_section: str,
-    evidence_section: str,
-    available_tools: list[dict[str, Any]],
-    client: LLMClient,
-    model: str = "gpt-4o-mini"
-) -> Step3WOutput:
-    """Synchronous wrapper for run_step3w_workflow_analysis."""
-    import asyncio
-    return asyncio.run(run_step3w_workflow_analysis(
-        workflow_section=workflow_section,
-        tools_section=tools_section,
-        evidence_section=evidence_section,
-        available_tools=available_tools,
-        client=client,
-        model=model
-    ))

@@ -111,9 +111,13 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
             Step3WorkflowStep,
             Step4SPLStep,
         )
+        # Use sequential runner: pipeline steps are strictly linear by dependency
+        # graph, so ParallelRunner provides zero parallelism benefit while risking
+        # nested ThreadPoolExecutor shutdown errors (cannot schedule new futures
+        # after shutdown). True parallelism lives inside each step (e.g. step4
+        # S4A/S4B/S0, step1_5 per-tool API calls, p3 asyncio.gather).
         .with_runner(
-            runner_type="parallel",
-            max_workers=config._new_config.max_parallel_workers,
+            runner_type="sequential",
         )
         .with_checkpointing(config.save_checkpoints)
         .build()

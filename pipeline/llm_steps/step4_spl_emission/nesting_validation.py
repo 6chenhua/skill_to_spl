@@ -4,14 +4,21 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 
 from pipeline.llm_client import LLMClient
+from pipeline.orchestrator.checkpoint import CheckpointManager
 from prompts import templates
 
 logger = logging.getLogger(__name__)
 
 
-async def _call_4e1_async(client: LLMClient, worker_spl: str, model: str | None = None) -> dict:
+async def _call_4e1_async(
+    client: LLMClient,
+    worker_spl: str,
+    model: str | None = None,
+    output_dir: Path | None = None,
+) -> dict:
     """Detect illegal nested BLOCK structures in WORKER SPL.
 
     Returns a dict with:
@@ -40,14 +47,24 @@ async def _call_4e1_async(client: LLMClient, worker_spl: str, model: str | None 
             cleaned = "\n".join(lines).strip()
 
         result = json.loads(cleaned)
-        return result
     except json.JSONDecodeError as e:
         logger.warning("[Step 4E1] Failed to parse JSON response: %s", e)
         logger.debug("[Step 4E1] Raw response:\n%s", response[:500])
-        return {"has_violations": False, "violations": []}
+        result = {"has_violations": False, "violations": []}
+
+    # Save checkpoint if output_dir is provided
+    if output_dir is not None:
+        CheckpointManager().save("step4e1_nesting_detection", result, output_dir)
+    return result
 
 
-async def _call_4e2_async(client: LLMClient, worker_spl: str, violations: list, model: str | None = None) -> str:
+async def _call_4e2_async(
+    client: LLMClient,
+    worker_spl: str,
+    violations: list,
+    model: str | None = None,
+    output_dir: Path | None = None,
+) -> str:
     """Fix illegal nested BLOCK structures by flattening.
 
     Returns the corrected WORKER SPL text.
@@ -57,12 +74,16 @@ async def _call_4e2_async(client: LLMClient, worker_spl: str, violations: list, 
         worker_spl=worker_spl,
         violations_json=violations_json,
     )
-    return await client.async_call(
+    result = await client.async_call(
         step_name="step4e2_nesting_fix",
         system=templates.S4E2_SYSTEM,
         user=s4e2_user,
         model=model,
     )
+    # Save checkpoint if output_dir is provided
+    if output_dir is not None:
+        CheckpointManager().save("step4e2_nesting_fix", result, output_dir)
+    return result
 
 
 async def validate_and_fix_worker_nesting_async(client: LLMClient, worker_spl: str, model: str | None = None) -> tuple[str, dict]:
@@ -103,13 +124,19 @@ async def validate_and_fix_worker_nesting_async(client: LLMClient, worker_spl: s
         return worker_spl, detection_result
 
 
-def validate_and_fix_worker_nesting(client: LLMClient, worker_spl: str, model: str | None = None) -> tuple[str, dict]:
+def validate_and_fix_worker_nesting(
+    client: LLMClient,
+    worker_spl: str,
+    model: str | None = None,
+    output_dir: Path | None = None,
+) -> tuple[str, dict]:
     """Validate and fix nested BLOCK structures in WORKER SPL (sync version).
 
     Args:
         client: LLM client for making calls
         worker_spl: The generated WORKER SPL text
         model: Optional model override for LLM calls
+        output_dir: Optional output directory for checkpoints
 
     Returns:
         Tuple of (corrected_worker_spl, detection_result)
@@ -143,6 +170,10 @@ def validate_and_fix_worker_nesting(client: LLMClient, worker_spl: str, model: s
         logger.debug("[Step 4E1] Raw response:\n%s", response[:500])
         detection_result = {"has_violations": False, "violations": []}
 
+    # Save checkpoint if output_dir is provided
+    if output_dir is not None:
+        CheckpointManager().save("step4e1_nesting_detection", detection_result, output_dir)
+
     if detection_result.get("has_violations", False):
         violations = detection_result.get("violations", [])
         logger.warning(
@@ -170,6 +201,9 @@ def validate_and_fix_worker_nesting(client: LLMClient, worker_spl: str, model: s
             user=s4e2_user,
             model=model,
         )
+        # Save checkpoint for S4E2 result
+        if output_dir is not None:
+            CheckpointManager().save("step4e2_nesting_fix", fixed_spl, output_dir)
         return fixed_spl, detection_result
     else:
         logger.info("[Step 4E.1] No nested BLOCK violations found")

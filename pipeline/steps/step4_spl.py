@@ -22,6 +22,7 @@ from pipeline.llm_steps.step4_spl_emission import (
     _prepare_step4_inputs_parallel,
     validate_and_fix_worker_nesting,
 )
+from pipeline.spl_formatter import format_worker_block_indentation
 from pipeline.orchestrator.base import PipelineStep
 from pipeline.orchestrator.execution_context import ExecutionContext
 from pipeline.orchestrator.step_registry import registry
@@ -73,7 +74,7 @@ class Step4SPLStep(PipelineStep[dict, dict]):
         """
         context.logger.info("[Step 4] Launching parallel sub-steps...")
         context.logger.debug("[Step 4] Received inputs with keys: %s", list(inputs.keys()))
-        
+
         # Validate required inputs
         if "step1_structure" not in inputs:
             raise ValueError(
@@ -97,6 +98,10 @@ class Step4SPLStep(PipelineStep[dict, dict]):
                 f"Available keys: {list(step1_data.keys())}"
             )
 
+        # Get skill_id from step1_data (top level), not from bundle_data
+        skill_id = step1_data.get("skill_id", "unknown")
+        context.logger.debug("[Step 4] Using skill_id: %s", skill_id)
+
         # Reconstruct SectionBundle from dict - handle SectionItem dicts
         bundle_sections = {}
         for key, items in bundle_data.items():
@@ -113,7 +118,7 @@ class Step4SPLStep(PipelineStep[dict, dict]):
                 bundle_sections[key] = section_items
             else:
                 bundle_sections[key] = items
-        
+
         bundle = SectionBundle(**bundle_sections)
 
         # Get Step 3 output
@@ -195,7 +200,7 @@ class Step4SPLStep(PipelineStep[dict, dict]):
 
         # Phase 1: Launch S4C (needs type_registry)
         model_4c = context.config.get_step_model("step4c_variables_files")
-        block_4c = _call_4c(context.client, s4c_in, model=model_4c)
+        block_4c = _call_4c(context.client, s4c_in, model=model_4c, output_dir=context.output_dir)
 
         # Extract symbol table from S4C output
         symbol_table = _extract_symbol_table(block_4c)
@@ -217,41 +222,54 @@ class Step4SPLStep(PipelineStep[dict, dict]):
         context.logger.info("[Step 4] Prepared APIs block (%d chars)", len(block_4d))
 
         # Phase 2: Launch S4A, S4B, S0 in parallel
-        with ThreadPoolExecutor(max_workers=3) as pool:
+        import traceback as _traceback
+        pool = ThreadPoolExecutor(max_workers=3)
+        try:
             # Submit parallel tasks
+            context.logger.info("[Step 4] Phase 2: Submitting S4A, S4B, S0 to thread pool...")
             future_4a = pool.submit(
                 _call_4a, context.client, s4a_inputs, symbol_table_text,
-                context.config.get_step_model("step4a_persona")
+                context.config.get_step_model("step4a_persona"),
+                context.output_dir
             )
             future_4b = pool.submit(
                 _call_4b, context.client, s4b_inputs, symbol_table_text,
-                context.config.get_step_model("step4b_constraints")
+                context.config.get_step_model("step4b_constraints"),
+                context.output_dir
             )
 
             # S0: Generate DEFINE_AGENT header
             intent_text = bundle.to_text(["INTENT"])
             notes_text = bundle.to_text(["NOTES"])
             future_s0 = pool.submit(
-                _call_s0, context.client, bundle_data.get("skill_id", "unknown"), intent_text, notes_text,
-                context.config.get_step_model("step0_define_agent")
+                _call_s0, context.client, skill_id, intent_text, notes_text,
+                context.config.get_step_model("step0_define_agent"),
+                context.output_dir
             )
 
             # Collect results
             block_4a = future_4a.result()
             block_4b = future_4b.result()
             block_s0 = future_s0.result()
+        except Exception as _e:
+            context.logger.error("[Step 4] Phase 2 FAILED with full traceback:\n%s", _traceback.format_exc())
+            raise
+        finally:
+            pool.shutdown(wait=True)
 
         # Phase 3: S4E (merge point)
         context.logger.info("[Step 4] Phase 3: S4E (worker)...")
         block_4e_original = _call_4e(
             context.client, s4e_inputs, symbol_table_text, block_4d,
-            context.config.get_step_model("step4e_worker")
+            context.config.get_step_model("step4e_worker"),
+            context.output_dir
         )
 
         # Phase 4: S4E1/S4E2 - Validate and fix nested BLOCK structures
         block_4e, nesting_result = validate_and_fix_worker_nesting(
             context.client, block_4e_original,
-            context.config.get_step_model("step4e1_nesting_fix")
+            context.config.get_step_model("step4e1_nesting_fix"),
+            context.output_dir
         )
 
         if nesting_result.get("has_violations", False):
@@ -259,6 +277,9 @@ class Step4SPLStep(PipelineStep[dict, dict]):
                 "[Step 4] Phase 4: S4E1 detected %d violations, S4E2 fixed them",
                 len(nesting_result.get("violations", []))
             )
+            # Re-format indentation after 4E2 fixes
+            context.logger.info("[Step 4] Phase 4: Re-formatting WORKER indentation after 4E2 fixes...")
+            block_4e = format_worker_block_indentation(block_4e)
         else:
             context.logger.info("[Step 4] Phase 4: S4E1 - no nested BLOCK violations found")
 
@@ -268,11 +289,11 @@ class Step4SPLStep(PipelineStep[dict, dict]):
             context.logger.info("[Step 4] Phase 5: S4F (examples)...")
             block_4f = _call_4f(
                 context.client, s4f_inputs, block_4e,
-                context.config.get_step_model("step4f_examples")
+                context.config.get_step_model("step4f_examples"),
+                context.output_dir
             )
 
         # Assemble final SPL
-        skill_id = bundle_data.get("skill_id", "unknown")
         spl_text = _assemble_spl(
             skill_id, block_s0, block_4a, block_4b, block_4c, block_4d, block_4e, block_4f, types_spl
         )

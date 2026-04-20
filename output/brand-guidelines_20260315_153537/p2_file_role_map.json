@@ -1,8 +1,0 @@
-{
-  "SKILL.md": {
-    "role": "primary",
-    "read_priority": 1,
-    "must_read_for_normalization": true,
-    "reasoning": "SKILL.md is the fixed anchor of every skill package."
-  }
-}

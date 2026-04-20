@@ -120,6 +120,7 @@ if __name__ == '__main__':
         # capability_profile=capability_profile,
         save_checkpoints=True,
         use_new_step3=True,
+        # resume_from='step4_spl'
     )
 
     result = run_pipeline(config)

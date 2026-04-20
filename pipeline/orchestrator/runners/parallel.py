@@ -62,8 +62,10 @@ class ParallelRunner(Runner):
             self.max_workers,
         )
 
+        failed_error: Exception | None = None
+
         with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
-            while remaining:
+            while remaining and failed_error is None:
                 # Find steps ready to execute (all dependencies complete)
                 ready = self._get_ready_steps(remaining, results)
 
@@ -83,7 +85,10 @@ class ParallelRunner(Runner):
                     for name in ready
                 }
 
-                # Collect results
+                # Collect results — capture first error, don't raise inside
+                # the with-block to avoid "cannot schedule new futures after
+                # shutdown" when the pool's __exit__ is triggered mid-loop.
+                batch_failed = False
                 for future in as_completed(futures):
                     step_name = futures[future]
                     try:
@@ -92,11 +97,19 @@ class ParallelRunner(Runner):
                         logger.debug("Step %s completed", step_name)
                     except Exception as e:
                         logger.error("Step %s failed: %s", step_name, e)
-                        raise
+                        failed_error = e
+                        batch_failed = True
+                        break  # exit as_completed loop, then while loop exits too
 
-                # Remove completed steps from remaining
-                for name in ready:
-                    remaining.remove(name)
+                # Only mark steps as done if the entire batch succeeded
+                if not batch_failed:
+                    for name in ready:
+                        remaining.remove(name)
+
+        # Re-raise outside the with-block so the pool is already shut down
+        # cleanly before we propagate the error.
+        if failed_error is not None:
+            raise failed_error
 
         logger.info("Parallel execution complete: %d steps", len(results))
         return results
