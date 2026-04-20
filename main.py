@@ -66,7 +66,7 @@ if __name__ == '__main__':
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
     # 拼接带时间戳的输出目录
     output_dir = f'output/{skill}_{current_time}'
-    output_dir = f'output/{skill}-test'
+    output_dir = f'output/{skill}-v3'
 
     llm_config = LLMConfig(
         # base_url='https://openrouter.ai/api/v1',

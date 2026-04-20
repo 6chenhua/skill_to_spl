@@ -25,6 +25,21 @@ def _strip_fences(text: str) -> str:
     return "\n".join(lines).strip()
 
 
+def _dedent_block(text: str) -> str:
+    """Strip all leading indentation from a block of text.
+
+    Each line is individually stripped of leading whitespace,
+    so the resulting block has zero indentation. This allows
+    format_spl_indentation to rebuild indentation from scratch.
+
+    Empty lines are preserved as-is.
+    """
+    if not text:
+        return text
+    lines = text.split('\n')
+    return '\n'.join(line.lstrip() if line.strip() else line for line in lines)
+
+
 def _build_review_summary() -> str:
     """Build review summary header."""
     return "## Review Summary\n"

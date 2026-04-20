@@ -22,7 +22,6 @@ from pipeline.llm_steps.step4_spl_emission import (
     _prepare_step4_inputs_parallel,
     validate_and_fix_worker_nesting,
 )
-from pipeline.spl_formatter import format_worker_block_indentation
 from pipeline.orchestrator.base import PipelineStep
 from pipeline.orchestrator.execution_context import ExecutionContext
 from pipeline.orchestrator.step_registry import registry
@@ -277,9 +276,6 @@ class Step4SPLStep(PipelineStep[dict, dict]):
                 "[Step 4] Phase 4: S4E1 detected %d violations, S4E2 fixed them",
                 len(nesting_result.get("violations", []))
             )
-            # Re-format indentation after 4E2 fixes
-            context.logger.info("[Step 4] Phase 4: Re-formatting WORKER indentation after 4E2 fixes...")
-            block_4e = format_worker_block_indentation(block_4e)
         else:
             context.logger.info("[Step 4] Phase 4: S4E1 - no nested BLOCK violations found")
 

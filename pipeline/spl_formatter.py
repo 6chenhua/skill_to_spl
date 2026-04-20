@@ -31,6 +31,7 @@ BLOCK_PATTERNS = [
     (r'^\[DEFINE_AUDIENCE:\]', r'^\[END_AUDIENCE\]', 1),
     (r'^\[DEFINE_CONCEPTS:\]', r'^\[END_CONCEPTS\]', 1),
     (r'^\[DEFINE_CONSTRAINTS:\]', r'^\[END_CONSTRAINTS\]', 1),
+    (r'^\[DEFINE_TYPES:\]', r'^\[END_TYPES\]', 1),
     (r'^\[DEFINE_VARIABLES:\]', r'^\[END_VARIABLES\]', 1),
     (r'^\[DEFINE_FILES:\]', r'^\[END_FILES\]', 1),
     (r'^\[DEFINE_APIS:\]', r'^\[END_APIS\]', 1),
@@ -193,40 +194,64 @@ def format_spl_indentation(spl_text: str, indent_size: int = 4) -> str:
         
         # 分类这一行
         line_type, level = _classify_line(stripped)
-        
+
         if line_type == 'start':
-            # Block开始标记
-            # 缩进到其定义的层级
+            # ── TYPES: skip entirely (pre-formatted) ──
+            if re.match(r'^\[DEFINE_TYPES:\]', stripped):
+                result.append(' ' * (level * indent_size) + stripped)
+                i += 1
+                while i < len(lines):
+                    s = lines[i].strip()
+                    if not s:
+                        result.append(lines[i])
+                        i += 1
+                        continue
+                    result.append(lines[i])
+                    i += 1
+                    if re.match(r'^\[END_TYPES\]$', s):
+                        break
+                continue
+
+            # ── WORKER: skip entirely (pre-formatted) ──
+            if re.match(r'^\[DEFINE_WORKER:', stripped):
+                result.append(' ' * (level * indent_size) + stripped)
+                i += 1
+                while i < len(lines):
+                    s = lines[i].strip()
+                    if not s:
+                        result.append(lines[i])
+                        i += 1
+                        continue
+                    result.append(lines[i])
+                    i += 1
+                    if re.match(r'^\[END_WORKER\]$', s):
+                        break
+                continue
+
+            # ── Generic block start ──
             result.append(' ' * (level * indent_size) + stripped)
-            # 内容层级 = 标记层级 + 1
             stack.append(level + 1)
             i += 1
-            
-            # 特殊处理：如果是[DEFINE_APIS:]，按API单元处理
+
+            # ── APIS: special handling for API units ──
             if '[DEFINE_APIS:]' in stripped:
                 i += 1
                 while i < len(lines):
-                    line = lines[i]
-                    stripped_inner = line.strip()
-                    
-                    if not stripped_inner:
-                        result.append(line)
+                    ap_line = lines[i]
+                    ap_stripped = ap_line.strip()
+                    if not ap_stripped:
+                        result.append(ap_line)
                         i += 1
                         continue
-                    
-                    if '[END_APIS]' in stripped_inner:
+                    if '[END_APIS]' in ap_stripped:
                         break
-                    
-                    if _is_api_declaration(stripped_inner):
-                        # 收集完整API块
+                    if _is_api_declaration(ap_stripped):
                         api_lines, next_idx = _collect_api_block(lines, i)
-                        # API块缩进到层级2（在APIS内部）
                         indented_api = _indent_api_block(api_lines, 2 * indent_size, indent_size)
                         result.extend(indented_api)
                         i = next_idx
                     else:
-                        # 其他内容（不应该在APIS内部出现）
-                        result.append(' ' * (2 * indent_size) + stripped_inner)
+                        result.append(' ' * (2 * indent_size) + ap_stripped)
                         i += 1
                 continue
             
@@ -366,78 +391,141 @@ def is_spl_indentation_valid(spl_text: str) -> bool:
 
 def format_worker_block_indentation(worker_spl: str, indent_size: int = 4) -> str:
     """格式化单个WORKER block的缩进。
-    
-    这个函数假设输入是完整的WORKER block（包含[DEFINE_WORKER:...]和[END_WORKER]），
-    并相对于WORKER的层级（level 1）来格式化内部内容。
-    
-    Args:
-        worker_spl: WORKER SPL文本
-        indent_size: 每个层级的缩进空格数（默认4）
-        
-    Returns:
-        格式化后的WORKER SPL文本
+
+    直接按规则逐行分类赋缩进，从零重建，不依赖已有缩进。
+    BLOCK（IF/SEQUENTIAL_BLOCK/WHILE/FOR）不允许嵌套，全部固定 level 3。
+
+    缩进规则：
+      4sp  : DEFINE_WORKER / END_WORKER           (level 1)
+      8sp  : INPUTS / OUTPUTS / MAIN_FLOW /       (level 2)
+             ALTERNATIVE_FLOW / EXCEPTION_FLOW / EXAMPLES
+      12sp : SEQUENTIAL_BLOCK / IF / WHILE / FOR / (level 3)
+             ELSE / ELSEIF / END_xxx
+             INPUTS内容 / OUTPUTS内容
+      16sp : COMMAND / DECISION 等内容行           (level 4)
     """
     if not worker_spl or not worker_spl.strip():
         return worker_spl
-    
+
+    # ── 行分类表 ──
+    # (正则, 类型, 层级)
+    # 类型: 'start' | 'end' | 'control'
+    TAG_TABLE: list[tuple[re.Pattern, str, int]] = [
+        # END 标记（先匹配，防止 [END_IF] 被误认为 [IF]）
+        (re.compile(r'^\[END_WORKER\]$'),          'end',    1),
+        (re.compile(r'^\[END_INPUTS\]$'),          'end',    2),
+        (re.compile(r'^\[END_OUTPUTS\]$'),         'end',    2),
+        (re.compile(r'^\[END_MAIN_FLOW\]$'),       'end',    2),
+        (re.compile(r'^\[END_ALTERNATIVE_FLOW\]$'),'end',    2),
+        (re.compile(r'^\[END_EXCEPTION_FLOW\]$'),  'end',    2),
+        (re.compile(r'^\[END_EXAMPLES\]$'),        'end',    2),
+        (re.compile(r'^\[END_SEQUENTIAL_BLOCK\]$'),'end',    3),
+        (re.compile(r'^\[END_IF\]$'),              'end',    3),
+        (re.compile(r'^\[END_WHILE\]$'),           'end',    3),
+        (re.compile(r'^\[END_FOR\]$'),             'end',    3),
+    # 控制流标记
+        (re.compile(r'\[ELSEIF\s+'), 'control',3),
+        (re.compile(r'\[ELSE\]$'), 'control',3),
+        # START 标记
+        (re.compile(r'^\[DEFINE_WORKER:'), 'start', 1),
+        (re.compile(r'^\[INPUTS\]$'), 'start', 2),
+        (re.compile(r'^\[OUTPUTS\]$'), 'start', 2),
+        (re.compile(r'^\[MAIN_FLOW\]$'), 'start', 2),
+        (re.compile(r'^\[ALTERNATIVE_FLOW:'), 'start', 2),
+        (re.compile(r'^\[EXCEPTION_FLOW:'), 'start', 2),
+        (re.compile(r'^\[EXAMPLES\]$'), 'start', 2),
+        (re.compile(r'^\[SEQUENTIAL_BLOCK\]$'), 'start', 3),
+        (re.compile(r'\[IF\s+'), 'start', 3),
+        (re.compile(r'\[WHILE\s+'), 'start', 3),
+        (re.compile(r'\[FOR\s+'), 'start', 3),
+    ]
+
+    def _classify(line: str) -> tuple[str, int] | None:
+        for pat, tag_type, level in TAG_TABLE:
+            if pat.search(line):
+                return (tag_type, level)
+        return None
+
     lines = worker_spl.split('\n')
     result = []
-    stack = []  # 相对于WORKER内部的层级栈
-    i = 0
-    
-    # WORKER基础偏移 = 1 (DEFINE_WORKER在层级1)
-    base_level = 1
-    
-    while i < len(lines):
-        line = lines[i]
-        stripped = line.strip()
-        
-        # 空行处理
+    stack: list[int] = []
+
+    for raw_line in lines:
+        stripped = raw_line.strip()
+
+        # 空行保持
         if not stripped:
-            result.append(line)
-            i += 1
+            result.append(raw_line)
             continue
-        
-        # 注释行处理
+
+        # 注释行：缩进到当前栈顶层级
         if stripped.startswith('#'):
-            current_level = len(stack)
-            result.append(' ' * ((base_level + current_level) * indent_size) + stripped)
-            i += 1
+            lvl = stack[-1] if stack else 2
+            result.append(' ' * (lvl * indent_size) + stripped)
             continue
-        
-        # 分类这一行
-        line_type, level = _classify_line(stripped)
-        
-        # 调整层级为相对于WORKER内部的层级
-        # level是全局层级，我们需要相对于base_level
-        relative_level = level - base_level
-        
-        if line_type == 'start':
-            # Block开始标记 - 缩进到其定义的全局层级
-            result.append(' ' * (level * indent_size) + stripped)
-            # 内容层级 = 标记层级 + 1
-            stack.append(level + 1)
-            i += 1
-            
-        elif line_type == 'end':
-            # Block结束标记 - 缩进到对应的开始标记同级
-            if stack:
-                content_level = stack.pop()
-                marker_level = content_level - 1
-                result.append(' ' * (marker_level * indent_size) + stripped)
-            else:
-                result.append(stripped)
-            i += 1
-            
-        elif line_type == 'control':
-            # 控制流标记 - 使用其全局层级
-            result.append(' ' * (level * indent_size) + stripped)
-            i += 1
-            
+
+        # 查表分类
+        match = _classify(stripped)
+
+        if match is not None:
+            tag_type, lvl = match
+            if tag_type == 'start':
+                result.append(' ' * (lvl * indent_size) + stripped)
+                stack.append(lvl + 1)
+            elif tag_type == 'end':
+                if stack:
+                    stack.pop()
+                result.append(' ' * (lvl * indent_size) + stripped)
+            else:  # control
+                result.append(' ' * (lvl * indent_size) + stripped)
+            continue
+
+        # 普通内容行：缩进到当前栈顶
+        lvl = stack[-1] if stack else 2
+        result.append(' ' * (lvl * indent_size) + stripped)
+
+    return '\n'.join(result)
+
+
+def format_types_block_indentation(types_spl: str, indent_size: int = 4) -> str:
+    """格式化单个DEFINE_TYPES block的缩进。
+
+    从零重建缩进，不影响其他block。
+
+    缩进规则：
+      4sp  : [DEFINE_TYPES:] / [END_TYPES]  (level 1)
+      8sp  : TYPES 内容行（类型声明）        (level 2)
+    """
+    if not types_spl or not types_spl.strip():
+        return types_spl
+
+    result = []
+    inside = False  # 是否在 [DEFINE_TYPES:] ... [END_TYPES] 内部
+
+    for raw_line in types_spl.split('\n'):
+        stripped = raw_line.strip()
+
+        # 空行保持
+        if not stripped:
+            result.append(raw_line)
+            continue
+
+        # [END_TYPES]
+        if re.match(r'^\[END_TYPES\]$', stripped):
+            result.append(' ' * (1 * indent_size) + stripped)
+            inside = False
+            continue
+
+        # [DEFINE_TYPES:]
+        if re.match(r'^\[DEFINE_TYPES:\]', stripped):
+            result.append(' ' * (1 * indent_size) + stripped)
+            inside = True
+            continue
+
+        # 内容行
+        if inside:
+            result.append(' ' * (2 * indent_size) + stripped)
         else:
-            # 普通内容行 - 缩进到当前栈深度
-            current_level = len(stack)
-            result.append(' ' * (current_level * indent_size) + stripped)
-            i += 1
-    
+            result.append(stripped)
+
     return '\n'.join(result)

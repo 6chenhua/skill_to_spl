@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import logging
 
-from pipeline.spl_formatter import format_spl_indentation
-from pipeline.llm_steps.step4_spl_emission.utils import _strip_fences, _to_pascal_case
+from pipeline.spl_formatter import format_spl_indentation, format_worker_block_indentation, format_types_block_indentation
+from pipeline.llm_steps.step4_spl_emission.utils import _strip_fences, _dedent_block, _to_pascal_case
 
 logger = logging.getLogger(__name__)
 
@@ -44,13 +44,21 @@ def _assemble_spl(
             )
         else:
             worker_block = worker_block + "\n\n" + examples_block
+    # Format worker block indentation from scratch (handles any LLM output quality)
+    worker_block = format_worker_block_indentation(worker_block)
 
     # Assemble SPL_PROMPT content (everything inside DEFINE_AGENT)
+    # Note: block_4d (APIS) must NOT be dedented — its internal structure
+    # is preserved and handled by format_spl_indentation's APIS special path.
     spl_prompt_blocks = []
-    for raw_block in (block_4a, block_4b, block_4c, block_4d):
-        cleaned = _strip_fences(raw_block.strip())
+    for raw_block in (block_4a, block_4b, block_4c):
+        cleaned = _dedent_block(_strip_fences(raw_block.strip()))
         if cleaned:
             spl_prompt_blocks.append(cleaned)
+    # block_4d: APIS block - strip fences only, preserve internal indentation
+    api_block = _strip_fences(block_4d.strip())
+    if api_block:
+        spl_prompt_blocks.append(api_block)
     if worker_block:
         spl_prompt_blocks.append(worker_block)
 
@@ -61,14 +69,15 @@ def _assemble_spl(
 
     # Use the generated DEFINE_AGENT header (or create a default one)
     if define_agent_header and define_agent_header.strip():
-        define_agent_line = _strip_fences(define_agent_header.strip())
+        define_agent_line = _dedent_block(_strip_fences(define_agent_header.strip()))
     else:
         # Fallback: generate a simple DEFINE_AGENT header
         agent_name = _to_pascal_case(skill_id)
         define_agent_line = f"[DEFINE_AGENT: {agent_name}]"
 
     # Include types_spl if provided (from Step 3-T)
-    types_block = _strip_fences(types_spl.strip()) if types_spl else ""
+    # Format types block with dedicated formatter
+    types_block = format_types_block_indentation(_strip_fences(types_spl.strip())) if types_spl else ""
 
     # Assemble final SPL with proper ordering
     # Order: DEFINE_AGENT -> TYPES -> 4a-4f -> END_AGENT
