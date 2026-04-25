@@ -61,24 +61,24 @@ if __name__ == '__main__':
     if sys.platform == 'win32':
         atexit.register(_cleanup_on_exit)
 
-    skill = "pdf"
+    skill = "internal-comms"
     # 生成当前时间字符串（格式：年-月-日_时-分-秒）
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
     # 拼接带时间戳的输出目录
     output_dir = f'output/{skill}_{current_time}'
-    output_dir = f'output/{skill}-v3'
+    output_dir = f'output/{skill}'
 
     llm_config = LLMConfig(
         # base_url='https://openrouter.ai/api/v1',
         # api_key='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',
-        model='gpt-4o',
+        model='gpt-4o-mini',
         max_tokens=16000,
     )
 
     tep_config = StepLLMConfig(
         step_models={
             # === Pre-steps ===
-            "step1_structure_extraction": "gpt-4o",
+            "step1_structure_extraction": "gpt-5.4-mini-2026-03-17",
             "step1_5_api_generation": "gpt-4o",
 
             # === Old Step 3 ===
@@ -99,7 +99,7 @@ if __name__ == '__main__':
             "step4c_variables_files": "gpt-4o",
 
             # S4E: Worker - **最关键**，生成工作流逻辑
-            "step4e_worker": "gpt-4",  # 用最强模型
+            "step4e_worker": "gpt-4o",  # 用最强模型
 
             # S4E1: Nesting Detection - 检测嵌套问题
             "step4e1_nesting_detection": "gpt-4o",
@@ -116,7 +116,7 @@ if __name__ == '__main__':
         skill_root=f'skills/{skill}',
         output_dir=output_dir,
         llm_config=llm_config,
-        # step_llm_config=step_config,
+        # step_llm_config=tep_config,
         # capability_profile=capability_profile,
         save_checkpoints=True,
         use_new_step3=True,

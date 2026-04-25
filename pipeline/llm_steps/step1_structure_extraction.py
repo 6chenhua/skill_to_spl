@@ -52,6 +52,7 @@ def run_step1_structure_extraction(
         system=templates.STEP1_SYSTEM,
         user=user_prompt,
         model=model,
+        max_tokens=30000,
     )
 
     bundle = _parse_section_bundle(raw)

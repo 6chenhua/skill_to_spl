@@ -247,6 +247,7 @@ class LLMClient:
         system: str,
         user: str,
         model: Optional[str] = None,
+        max_tokens: Optional[int] = 16000,
     ) -> str:
         """
         Send a single-turn system + user prompt. Returns the full response text.
@@ -267,7 +268,7 @@ class LLMClient:
                 logger.debug("[%s] attempt %d/%d", step_name, attempt, self.config.max_retries)
                 response = self._client.chat.completions.create(
                     model=effective_model,
-                    max_tokens=self.config.max_tokens,
+                    max_tokens=max_tokens,
                     temperature=self.config.temperature,
                     messages=[
                         {"role": "system", "content": system},
@@ -325,6 +326,7 @@ class LLMClient:
         system: str,
         user: str,
         model: Optional[str] = None,
+        max_tokens: Optional[int] = 16000,
     ) -> Any:
         """
         Call the LLM and parse the response as JSON.
@@ -343,7 +345,7 @@ class LLMClient:
         Raises:
             LLMParseError: if no valid JSON can be extracted.
         """
-        raw = self.call(step_name=step_name, system=system, user=user, model=model)
+        raw = self.call(step_name=step_name, system=system, user=user, model=model, max_tokens=max_tokens)
         return self._extract_json(raw, step_name)
 
 
